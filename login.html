@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Accesso - Analisi Geografica ACI</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+    
+    <style>
+        .gradient-bg {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+    </style>
+</head>
+<body class="gradient-bg min-h-screen flex items-center justify-center p-4">
+    <!-- Back Button -->
+    <a href="index.html" class="absolute top-4 left-4 px-4 py-2 bg-white/20 text-white rounded-lg hover:bg-white/30 transition backdrop-blur">
+        ← Torna alla Home
+    </a>
+
+    <div class="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-md">
+        <!-- Logo -->
+        <div class="flex justify-center mb-6">
+            <div class="w-20 h-20 bg-indigo-600 rounded-xl flex items-center justify-center">
+                <span class="text-white font-bold text-3xl">ACI</span>
+            </div>
+        </div>
+
+        <h1 class="text-3xl font-bold text-center text-gray-800 mb-2">Accesso al Sistema</h1>
+        <p class="text-center text-gray-600 mb-8">Inserisci le tue credenziali</p>
+
+        <!-- Login Form -->
+        <form id="loginForm" class="space-y-4">
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">Email</label>
+                <input type="email" id="email" required
+                    class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition"
+                    placeholder="tuo@email.com">
+            </div>
+            
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">Password</label>
+                <input type="password" id="password" required
+                    class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition"
+                    placeholder="••••••••">
+            </div>
+
+            <!-- GDPR Consent -->
+            <div class="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <label class="flex items-start gap-3 cursor-pointer">
+                    <input type="checkbox" id="gdprConsent" required class="mt-1">
+                    <span class="text-sm text-gray-700">
+                        Accetto il trattamento dei dati personali secondo quanto previsto dal 
+                        <a href="privacy.html" target="_blank" class="text-indigo-600 underline hover:text-indigo-800">GDPR</a> e la 
+                        <a href="privacy.html" target="_blank" class="text-indigo-600 underline hover:text-indigo-800">Privacy Policy</a>. *
+                    </span>
+                </label>
+            </div>
+
+            <!-- Error Message -->
+            <div id="errorMessage" class="hidden bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
+            </div>
+
+            <!-- Loading State -->
+            <div id="loadingState" class="hidden text-center py-3">
+                <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
+                <p class="text-sm text-gray-600 mt-2">Accesso in corso...</p>
+            </div>
+
+            <button type="submit" id="loginButton"
+                class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 rounded-lg transition transform hover:scale-105 shadow-lg">
+                Accedi
+            </button>
+        </form>
+
+        <!-- Footer Links -->
+        <div class="mt-6 text-center space-y-2">
+            <a href="#" class="text-sm text-indigo-600 hover:text-indigo-800">Password dimenticata?</a>
+            <div class="text-xs text-gray-500 space-x-2">
+                <a href="privacy.html" class="hover:text-gray-700">Privacy</a>
+                <span>•</span>
+                <a href="terms.html" class="hover:text-gray-700">Termini</a>
+                <span>•</span>
+                <a href="cookie-policy.html" class="hover:text-gray-700">Cookie</a>
+            </div>
+        </div>
+
+        <!-- Info Box -->
+        <div class="mt-6 bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+            <p class="text-xs text-gray-700">
+                <strong>ℹ️ Informativa:</strong> I tuoi dati sono protetti secondo gli standard GDPR. 
+                L'accesso è riservato al personale autorizzato ACI.
+            </p>
+        </div>
+    </div>
+
+    <script>
+        // Firebase Configuration
+        const firebaseConfig = {
+            apiKey: "AIzaSyDV_PzO4_PnR9xG9OXKHogE8TIophl9D-M",
+            authDomain: "analisi-commerciali.firebaseapp.com",
+            projectId: "analisi-commerciali",
+            storageBucket: "analisi-commerciali.firebasestorage.app",
+            messagingSenderId: "560138113336",
+            appId: "1:560138113336:web:d69384ff0bf3e20dbe71cd"
+        };
+
+        firebase.initializeApp(firebaseConfig);
+        const auth = firebase.auth();
+        const db = firebase.firestore();
+
+        // Login Form Handler
+        document.getElementById('loginForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+            const gdprConsent = document.getElementById('gdprConsent').checked;
+
+            if (!gdprConsent) {
+                showError('Devi accettare il trattamento dei dati personali per accedere');
+                return;
+            }
+
+            showLoading(true);
+            hideError();
+
+            try {
+                console.log('🔐 Tentativo di login...');
+                const userCredential = await auth.signInWithEmailAndPassword(email, password);
+                console.log('✅ Login riuscito, UID:', userCredential.user.uid);
+
+                // Verifica autorizzazione utente
+                const userDoc = await db.collection('utenti').doc(userCredential.user.uid).get();
+                
+                if (userDoc.exists) {
+                    const userData = userDoc.data();
+                    console.log('✅ Utente autorizzato:', userData);
+
+                    // Salva consenso GDPR con timestamp
+                    localStorage.setItem('gdprConsent', JSON.stringify({
+                        accepted: true,
+                        timestamp: new Date().toISOString(),
+                        userId: userCredential.user.uid
+                    }));
+
+                    // Log accesso per audit trail
+                    await db.collection('audit_logs').add({
+                        userId: userCredential.user.uid,
+                        email: userCredential.user.email,
+                        action: 'login',
+                        timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+                        ipAddress: 'client-side', // In produzione usare API per IP reale
+                        gdprConsent: true
+                    });
+
+                    // Redirect all'app
+                    window.location.href = 'app.html';
+                } else {
+                    console.error('❌ Utente non autorizzato');
+                    await auth.signOut();
+                    showError('Accesso non autorizzato. Contatta l\'amministratore.');
+                }
+            } catch (error) {
+                console.error('❌ Errore login:', error);
+                
+                let errorMsg = 'Errore durante l\'accesso';
+                if (error.code === 'auth/user-not-found') {
+                    errorMsg = 'Email non trovata nel sistema';
+                } else if (error.code === 'auth/wrong-password') {
+                    errorMsg = 'Password errata';
+                } else if (error.code === 'auth/too-many-requests') {
+                    errorMsg = 'Troppi tentativi. Riprova più tardi';
+                } else if (error.code === 'auth/invalid-email') {
+                    errorMsg = 'Email non valida';
+                }
+                
+                showError(errorMsg);
+            } finally {
+                showLoading(false);
+            }
+        });
+
+        function showError(message) {
+            const errorDiv = document.getElementById('errorMessage');
+            errorDiv.textContent = message;
+            errorDiv.classList.remove('hidden');
+        }
+
+        function hideError() {
+            document.getElementById('errorMessage').classList.add('hidden');
+        }
+
+        function showLoading(show) {
+            document.getElementById('loadingState').classList.toggle('hidden', !show);
+            document.getElementById('loginButton').classList.toggle('hidden', show);
+            document.getElementById('email').disabled = show;
+            document.getElementById('password').disabled = show;
+            document.getElementById('gdprConsent').disabled = show;
+        }
+
+        // Check if already logged in
+        auth.onAuthStateChanged(user => {
+            if (user) {
+                console.log('👤 Utente già autenticato, redirect...');
+                window.location.href = 'app.html';
+            }
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,1720 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Analisi Geografica Rete ACI v5.0 - Firebase</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/papaparse/5.4.1/papaparse.min.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .map-container { 
+            height: 500px; 
+            width: 100%; 
+            border-radius: 0.5rem;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
+        .tab-active {
+            background-color: #4f46e5;
+            color: white;
+        }
+        .tab-inactive {
+            background-color: #e0e7ff;
+            color: #4f46e5;
+        }
+    </style>
+
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+
+        const { useState, useEffect, useRef } = React;
+
+        // Funzione per normalizzare le coordinate
+        const normalizeCoordinate = (value, type = 'lat') => {
+            if (!value || value === 0) return 0;
+            
+            const num = parseFloat(value);
+            
+            // Se il numero è molto grande (es. 4125478 invece di 41.25478)
+            // dividi per 100000 per ottenere il valore corretto
+            if (type === 'lat') {
+                // Latitudine valida in Italia: tra 35 e 47 gradi
+                if (Math.abs(num) > 100) {
+                    const normalized = num / 100000;
+                    console.log(`📍 Normalizzata lat: ${num} → ${normalized}`);
+                    return normalized;
+                }
+            } else if (type === 'lon') {
+                // Longitudine valida in Italia: tra 6 e 19 gradi
+                if (Math.abs(num) > 100) {
+                    const normalized = num / 100000;
+                    console.log(`📍 Normalizzata lon: ${num} → ${normalized}`);
+                    return normalized;
+                }
+            }
+            
+            return num;
+        };
+
+        // Firebase Configuration
+        const firebaseConfig = {
+            apiKey: "AIzaSyDV_PzO4_PnR9xG9OXKHogE8TIophl9D-M",
+            authDomain: "analisi-commerciali.firebaseapp.com",
+            projectId: "analisi-commerciali",
+            storageBucket: "analisi-commerciali.firebasestorage.app",
+            messagingSenderId: "560138113336",
+            appId: "1:560138113336:web:d69384ff0bf3e20dbe71cd"
+        };
+
+        firebase.initializeApp(firebaseConfig);
+        const auth = firebase.auth();
+        const db = firebase.firestore();
+
+
+
+        // Componente Login
+        function LoginPage({ onLoginSuccess }) {
+            const [email, setEmail] = useState('');
+            const [password, setPassword] = useState('');
+            const [errore, setErrore] = useState('');
+            const [loading, setLoading] = useState(false);
+
+            const handleLogin = async (e) => {
+                e.preventDefault();
+                setErrore('');
+                setLoading(true);
+                try {
+                    const userCredential = await auth.signInWithEmailAndPassword(email, password);
+                    const userDoc = await db.collection('utenti').doc(userCredential.user.uid).get();
+                    if (userDoc.exists) {
+                        onLoginSuccess(userCredential.user, userDoc.data());
+                    } else {
+                        setErrore('Utente non autorizzato');
+                        await auth.signOut();
+                    }
+                } catch (error) {
+                    setErrore(error.code === 'auth/user-not-found' ? 'Email non trovata' : 
+                             error.code === 'auth/wrong-password' ? 'Password errata' : 'Errore login');
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            return (
+                <div className="min-h-screen bg-gradient-to-br from-indigo-100 via-white to-cyan-100 flex items-center justify-center p-4">
+                    <div className="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-md">
+                        <div className="flex justify-center mb-6">
+                            <img src={LOGO_ACI_BASE64} alt="ACI" className="h-20" />
+                        </div>
+                        <h1 className="text-3xl font-bold text-center text-gray-800 mb-8">Analisi ACI</h1>
+                        <form onSubmit={handleLogin} className="space-y-4">
+                            <div>
+                                <label className="block text-sm font-medium mb-2">Email</label>
+                                <input type="email" value={email} onChange={(e) => setEmail(e.target.value)}
+                                    className="w-full px-4 py-3 border rounded-lg" required disabled={loading} />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium mb-2">Password</label>
+                                <input type="password" value={password} onChange={(e) => setPassword(e.target.value)}
+                                    className="w-full px-4 py-3 border rounded-lg" required disabled={loading} />
+                            </div>
+                            {errore && <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">{errore}</div>}
+                            <button type="submit" disabled={loading}
+                                className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 rounded-lg">
+                                {loading ? 'Accesso...' : 'Accedi'}
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            );
+        }
+
+        // Componente Container
+        function AppContainer() {
+            const [user, setUser] = useState(null);
+            const [userData, setUserData] = useState(null);
+            const [loading, setLoading] = useState(true);
+
+            useEffect(() => {
+                return auth.onAuthStateChanged(async (firebaseUser) => {
+                    if (firebaseUser) {
+                        const doc = await db.collection('utenti').doc(firebaseUser.uid).get();
+                        if (doc.exists) {
+                            setUser(firebaseUser);
+                            setUserData(doc.data());
+                        }
+                    }
+                    setLoading(false);
+                });
+            }, []);
+
+            if (loading) {
+                return (
+                    <div className="min-h-screen flex items-center justify-center">
+                        <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-indigo-600"></div>
+                    </div>
+                );
+            }
+
+            if (!user) {
+                return <LoginPage onLoginSuccess={(u, d) => { setUser(u); setUserData(d); }} />;
+            }
+
+            return <App user={user} userData={userData} onLogout={() => { auth.signOut(); setUser(null); }} />;
+        }
+
+
+        // Logo ACI in base64
+        const LOGO_ACI_BASE64 = "data:image/png;base64,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";
+
+        function App({ user, userData, onLogout }) {
+            const [centri, setCentri] = useState([]);
+            const [comuni, setComuni] = useState([]);
+            const [selectedCentro, setSelectedCentro] = useState(null);
+            const [selectedComune, setSelectedComune] = useState(null);
+            const [raggio, setRaggio] = useState(20);
+            const [moltiplicatore, setMoltiplicatore] = useState(1.3);
+            const [risultati, setRisultati] = useState([]);
+            const [risultatiCentri, setRisultatiCentri] = useState([]);
+            const [selectedComuni, setSelectedComuni] = useState([]); // Array di boolean per checkbox
+            const [selectedCentriRisultati, setSelectedCentriRisultati] = useState([]); // Array di boolean per checkbox centri
+            const [sortColumn, setSortColumn] = useState(null); // Colonna ordinamento
+            const [sortDirection, setSortDirection] = useState('asc'); // 'asc' o 'desc'
+            const [sortColumnCentri, setSortColumnCentri] = useState(null);
+            const [sortDirectionCentri, setSortDirectionCentri] = useState('asc');
+            const [loading, setLoading] = useState(false);
+            const [progress, setProgress] = useState('');
+            const [errorMessage, setErrorMessage] = useState('');
+            const [cacheCoordinate, setCacheCoordinate] = useState({});
+            const [debugInfo, setDebugInfo] = useState('');
+            const [mapReady, setMapReady] = useState(false);
+            const [modalita, setModalita] = useState('centro-comuni'); // 'centro-comuni' o 'comune-centri'
+            
+            const [selectedRegione, setSelectedRegione] = useState('');
+            const [selectedProvincia, setSelectedProvincia] = useState('');
+            
+            const [visibleFields, setVisibleFields] = useState({
+                CODICECD: true,
+                RAGIONESOCIALE: true,
+                INDIRIZZO: true,
+                LOCALITA: true,
+                PROV: true,
+                CAP: false,
+                REGIONE: true,
+                PI: false,
+                DATAPS: false,
+                MAIL: true,
+                RECAPITOTELEFONICO: true,
+                ANGA: true,
+                Commerciale: false,
+                TELCO: false,
+                Pec: false,
+                CodFis: false
+            });
+
+            const mapRef = useRef(null);
+            const mapContainerRef = useRef(null);
+            
+            // Funzione per pulire cache e ricaricare
+            const refreshCache = () => {
+                if (window.confirm('Vuoi ricaricare i dati da Firebase?\n\nQuesto consumerà letture Firebase ma aggiornerà i dati.')) {
+                    localStorage.removeItem('aci_data_cache');
+                    localStorage.removeItem('aci_data_timestamp');
+                    localStorage.removeItem('aci_data_version');
+                    window.location.reload();
+                }
+            };
+
+            // Carica dati da Firestore CON CACHE
+            useEffect(() => {
+                const loadData = async () => {
+                    setLoading(true);
+                    setProgress('Caricamento dati...');
+                    
+                    try {
+                        // PROVA PRIMA DALLA CACHE
+                        const cachedData = localStorage.getItem('aci_data_cache');
+                        const cacheTimestamp = localStorage.getItem('aci_data_timestamp');
+                        const cacheVersion = localStorage.getItem('aci_data_version');
+                        const CURRENT_VERSION = '1.0';
+                        const CACHE_DURATION = 24 * 60 * 60 * 1000; // 24 ore
+                        
+                        const now = Date.now();
+                        const isCacheValid = cachedData && cacheTimestamp && cacheVersion === CURRENT_VERSION &&
+                                            (now - parseInt(cacheTimestamp)) < CACHE_DURATION;
+                        
+                        if (isCacheValid) {
+                            console.log('📦 Caricamento dati dalla CACHE locale...');
+                            setProgress('Caricamento dati dalla cache...');
+                            
+                            const cached = JSON.parse(cachedData);
+                            setCentri(cached.centri);
+                            setComuni(cached.comuni);
+                            
+                            const cacheAge = Math.round((now - parseInt(cacheTimestamp)) / 1000 / 60); // minuti
+                            setProgress(`✅ Caricati ${cached.centri.length} centri e ${cached.comuni.length} comuni dalla cache`);
+                            setDebugInfo(`📦 Dati caricati dalla cache locale (età: ${cacheAge} minuti) - Nessuna lettura Firebase! ✅`);
+                            console.log(`✅ Caricati dalla cache: ${cached.centri.length} centri, ${cached.comuni.length} comuni`);
+                            setLoading(false);
+                            return;
+                        }
+                        
+                        // CARICA DA FIREBASE SOLO SE CACHE NON VALIDA
+                        console.log('📊 Cache non valida, caricamento da Firebase...');
+                        setProgress('Caricamento dati da Firebase...');
+                        
+                        const cSnap = await db.collection('centri').get();
+                        console.log(`✅ Caricati ${cSnap.docs.length} centri da Firebase`);
+                        
+                        const cData = cSnap.docs.map((d, index) => {
+                            const data = d.data();
+                            
+                            // Prendi le coordinate grezze
+                            const rawLat = data.lat || data.LAT || 0;
+                            const rawLon = data.lon || data.LON || 0;
+                            
+                            // Normalizza le coordinate
+                            const normalizedLat = normalizeCoordinate(rawLat, 'lat');
+                            const normalizedLon = normalizeCoordinate(rawLon, 'lon');
+                            
+                            if (index === 0) {
+                                console.log('📍 Esempio coordinate primo centro:', {
+                                    raw: { lat: rawLat, lon: rawLon },
+                                    normalized: { lat: normalizedLat, lon: normalizedLon },
+                                    codice: data.CODICECD
+                                });
+                            }
+                            
+                            return {
+                                ...data,
+                                lat: normalizedLat,
+                                lon: normalizedLon,
+                                LAT: normalizedLat,
+                                LON: normalizedLon,
+                                coordinates: {
+                                    lat: normalizedLat,
+                                    lng: normalizedLon
+                                },
+                                // Normalizza i nomi dei campi
+                                CODICECD: data.CODICECD || '',
+                                RAGIONESOCIALE: data.RAGIONESOCIALE || '',
+                                INDIRIZZO: data.INDIRIZZO || '',
+                                LOCALITA: data.LOCALITA || '',
+                                PROV: data.PROV || '',
+                                CAP: data.CAP || '',
+                                REGIONE: data.REGIONE || '',
+                                MAIL: data.MAIL || '',
+                                RECAPITOTELEFONICO: data.RECAPITOTELEFONICO || '',
+                                ANGA: data.ANGA || ''
+                            };
+                        });
+                        
+                        // Verifica che abbiamo coordinate valide
+                        const centriConCoordinate = cData.filter(c => c.coordinates.lat !== 0 && c.coordinates.lng !== 0);
+                        console.log(`✅ ${centriConCoordinate.length} centri hanno coordinate valide`);
+                        
+                        setCentri(cData);
+                        
+                        const coSnap = await db.collection('comuni').get();
+                        console.log(`✅ Caricati ${coSnap.docs.length} comuni`);
+                        
+                        const coData = coSnap.docs.map((d, index) => {
+                            const data = d.data();
+                            
+                            // Prendi le coordinate grezze
+                            const rawLat = data.lat || data.LAT || 0;
+                            const rawLon = data.lon || data.LON || 0;
+                            
+                            // Normalizza le coordinate
+                            const normalizedLat = normalizeCoordinate(rawLat, 'lat');
+                            const normalizedLon = normalizeCoordinate(rawLon, 'lon');
+                            
+                            if (index === 0) {
+                                console.log('📍 Esempio coordinate primo comune:', {
+                                    raw: { lat: rawLat, lon: rawLon },
+                                    normalized: { lat: normalizedLat, lon: normalizedLon },
+                                    nome: data.Comune || data.Territorio
+                                });
+                            }
+                            
+                            return {
+                                ...data,
+                                lat: normalizedLat,
+                                lon: normalizedLon,
+                                LAT: normalizedLat,
+                                LON: normalizedLon,
+                                coordinates: {
+                                    lat: normalizedLat,
+                                    lng: normalizedLon
+                                },
+                                // Normalizza i nomi dei campi
+                                Territorio: data.Territorio || data.Comune || data.COMUNE || '',
+                                Comune: data.Comune || data.Territorio || data.COMUNE || '',
+                                Provincia: data.Provincia || data.PROVINCIA || data.PROV || '',
+                                Regione: data.Regione || data.REGIONE || '',
+                                Incidenti: data.Incidenti || 0,
+                                Soccorsi: data.Soccorsi || 0,
+                                Morti: data.Morti || 0
+                            };
+                        });
+                        
+                        // Verifica che abbiamo coordinate valide
+                        const comuniConCoordinate = coData.filter(c => c.coordinates.lat !== 0 && c.coordinates.lng !== 0);
+                        console.log(`✅ ${comuniConCoordinate.length} comuni hanno coordinate valide`);
+                        
+                        setComuni(coData);
+                        
+                        // SALVA IN CACHE
+                        try {
+                            const cacheData = {
+                                centri: cData,
+                                comuni: coData
+                            };
+                            localStorage.setItem('aci_data_cache', JSON.stringify(cacheData));
+                            localStorage.setItem('aci_data_timestamp', Date.now().toString());
+                            localStorage.setItem('aci_data_version', '1.0');
+                            console.log('💾 Dati salvati in cache locale');
+                        } catch (cacheError) {
+                            console.warn('⚠️ Errore salvataggio cache:', cacheError);
+                        }
+                        
+                        setProgress(`✅ Caricati ${cData.length} centri ACI e ${coData.length} comuni da Firebase`);
+                        setDebugInfo(`✅ Database caricato da Firebase (${centriConCoordinate.length}/${cData.length} centri, ${comuniConCoordinate.length}/${coData.length} comuni con coordinate valide) e salvato in cache`);
+                        console.log('✅ Caricamento completato con successo!');
+                    } catch (err) {
+                        console.error('❌ Errore caricamento:', err);
+                        setErrorMessage('Errore caricamento dati: ' + err.message);
+                        if (err.code === 'permission-denied') {
+                            setErrorMessage('Errore: Permessi negati. Verifica le regole di sicurezza di Firestore.');
+                        }
+                    } finally {
+                        setLoading(false);
+                    }
+                };
+                loadData();
+            }, []);
+
+
+            const calcolaDistanza = (lat1, lon1, lat2, lon2) => {
+                const R = 6371;
+                const dLat = (lat2 - lat1) * Math.PI / 180;
+                const dLon = (lon2 - lon1) * Math.PI / 180;
+                const a = 
+                    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+                const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+                return R * c;
+            };
+
+            // Funzione per ordinare risultati
+            const handleSort = (column) => {
+                const newDirection = sortColumn === column && sortDirection === 'asc' ? 'desc' : 'asc';
+                setSortColumn(column);
+                setSortDirection(newDirection);
+                
+                const sorted = [...risultati].sort((a, b) => {
+                    let aVal = a[column];
+                    let bVal = b[column];
+                    
+                    // Gestisci valori null/undefined
+                    if (aVal === null || aVal === undefined) aVal = '';
+                    if (bVal === null || bVal === undefined) bVal = '';
+                    
+                    // Converti numeri se necessario
+                    if (column === 'distanzaStimata' || column === 'distanzaLineaAria' || column === 'Incidenti' || column === 'Soccorsi' || column === 'mediaIncidentiMese' || column === 'Morti') {
+                        aVal = parseFloat(aVal) || 0;
+                        bVal = parseFloat(bVal) || 0;
+                    }
+                    
+                    if (aVal < bVal) return newDirection === 'asc' ? -1 : 1;
+                    if (aVal > bVal) return newDirection === 'asc' ? 1 : -1;
+                    return 0;
+                });
+                
+                setRisultati(sorted);
+            };
+
+            // Funzione per ordinare centri
+            const handleSortCentri = (column) => {
+                const newDirection = sortColumnCentri === column && sortDirectionCentri === 'asc' ? 'desc' : 'asc';
+                setSortColumnCentri(column);
+                setSortDirectionCentri(newDirection);
+                
+                const sorted = [...risultatiCentri].sort((a, b) => {
+                    let aVal = a[column];
+                    let bVal = b[column];
+                    
+                    // Gestisci valori null/undefined
+                    if (aVal === null || aVal === undefined) aVal = '';
+                    if (bVal === null || bVal === undefined) bVal = '';
+                    
+                    if (column === 'distanzaStimata' || column === 'distanzaLineaAria') {
+                        aVal = parseFloat(aVal) || 0;
+                        bVal = parseFloat(bVal) || 0;
+                    }
+                    
+                    if (aVal < bVal) return newDirection === 'asc' ? -1 : 1;
+                    if (aVal > bVal) return newDirection === 'asc' ? 1 : -1;
+                    return 0;
+                });
+                
+                setRisultatiCentri(sorted);
+            };
+
+            // Toggle singolo comune
+            const toggleComune = (idx) => {
+                const newSelected = [...selectedComuni];
+                newSelected[idx] = !newSelected[idx];
+                setSelectedComuni(newSelected);
+            };
+
+            // Toggle tutti i comuni
+            const toggleAllComuni = () => {
+                const allSelected = selectedComuni.every(s => s);
+                setSelectedComuni(selectedComuni.map(() => !allSelected));
+            };
+
+            // Toggle singolo centro
+            const toggleCentro = (idx) => {
+                const newSelected = [...selectedCentriRisultati];
+                newSelected[idx] = !newSelected[idx];
+                setSelectedCentriRisultati(newSelected);
+            };
+
+            // Toggle tutti i centri
+            const toggleAllCentri = () => {
+                const allSelected = selectedCentriRisultati.every(s => s);
+                setSelectedCentriRisultati(selectedCentriRisultati.map(() => !allSelected));
+            };
+
+            // Calcola totali per comuni selezionati
+            const calcolaTotali = () => {
+                let totIncidenti = 0;
+                let totSoccorsi = 0;
+                let totMorti = 0;
+                let totMediaMensile = 0;
+                let count = 0;
+                
+                risultati.forEach((comune, idx) => {
+                    if (selectedComuni[idx]) {
+                        totIncidenti += parseInt(comune.Incidenti) || 0;
+                        totSoccorsi += parseInt(comune.Soccorsi) || 0;
+                        totMorti += parseInt(comune.Morti) || 0;
+                        totMediaMensile += parseFloat(comune.mediaIncidentiMese) || 0;
+                        count++;
+                    }
+                });
+                
+                return { totIncidenti, totSoccorsi, totMorti, totMediaMensile, count };
+            };
+
+            const geocodeWithCache = async (address, retries = 3) => {
+                if (cacheCoordinate[address]) {
+                    console.log(`📦 Coordinate dalla cache per: ${address}`);
+                    return cacheCoordinate[address];
+                }
+
+                console.log(`🌐 Geocodifica online per: ${address}`);
+                for (let attempt = 0; attempt < retries; attempt++) {
+                    try {
+                        await sleep(1100);
+                        const response = await fetch(
+                            `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}&countrycodes=it&limit=1`,
+                            { headers: { 'User-Agent': 'AnalisiReteApp/1.0' } }
+                        );
+                        
+                        if (!response.ok) continue;
+
+                        const data = await response.json();
+                        
+                        if (data && data.length > 0) {
+                            const coords = {
+                                lat: parseFloat(data[0].lat),
+                                lng: parseFloat(data[0].lon)
+                            };
+                            
+                            setCacheCoordinate(prev => ({ ...prev, [address]: coords }));
+                            return coords;
+                        }
+                    } catch (error) {
+                        if (attempt === retries - 1) {
+                            console.error('Geocodifica fallita per:', address);
+                        }
+                    }
+                }
+                return null;
+            };
+
+            const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+            // Inizializza mappa
+            useEffect(() => {
+                if (mapContainerRef.current && !mapRef.current) {
+                    console.log('🗺️ Inizializzo mappa...');
+                    
+                    try {
+                        const map = L.map(mapContainerRef.current).setView([41.9, 12.5], 6);
+                        
+                        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                            attribution: '© OpenStreetMap contributors',
+                            maxZoom: 19
+                        }).addTo(map);
+
+                        mapRef.current = map;
+                        setMapReady(true);
+                        
+                        console.log('✅ Mappa inizializzata');
+                    } catch (error) {
+                        console.error('❌ Errore inizializzazione mappa:', error);
+                    }
+                }
+            }, [mapContainerRef.current]);
+
+            // Aggiungi marker centri con logo ACI
+            useEffect(() => {
+                if (centri.length > 0 && mapRef.current && mapReady) {
+                    console.log('📍 Preparazione marker per', centri.length, 'centri');
+                    
+                    // Filtra solo centri con coordinate valide
+                    const centriValidi = centri.filter(c => 
+                        c.coordinates && 
+                        c.coordinates.lat && 
+                        c.coordinates.lng &&
+                        c.coordinates.lat !== 0 && 
+                        c.coordinates.lng !== 0 &&
+                        Math.abs(c.coordinates.lat) < 90 &&
+                        Math.abs(c.coordinates.lng) < 180
+                    );
+                    
+                    console.log(`✅ ${centriValidi.length} centri hanno coordinate valide`);
+                    
+                    if (centriValidi.length === 0) {
+                        console.warn('⚠️ Nessun centro con coordinate valide da mostrare');
+                        return;
+                    }
+                    
+                    // Rimuovi marker esistenti
+                    mapRef.current.eachLayer((layer) => {
+                        if (layer instanceof L.Marker) {
+                            mapRef.current.removeLayer(layer);
+                        }
+                    });
+
+                    // Crea icona personalizzata con logo ACI
+                    const aciIcon = L.icon({
+                        iconUrl: LOGO_ACI_BASE64,
+                        iconSize: [30, 30],
+                        iconAnchor: [15, 15],
+                        popupAnchor: [0, -15]
+                    });
+
+                    let markerCount = 0;
+
+                    centriValidi.forEach((centro, index) => {
+                        try {
+                            if (index === 0) {
+                                console.log('📍 Primo marker:', {
+                                    codice: centro.CODICECD,
+                                    lat: centro.coordinates.lat,
+                                    lng: centro.coordinates.lng
+                                });
+                            }
+                            
+                            const marker = L.marker(
+                                [centro.coordinates.lat, centro.coordinates.lng],
+                                { 
+                                    icon: aciIcon,
+                                    title: `${centro.CODICECD} - ${centro.RAGIONESOCIALE}` 
+                                }
+                            ).addTo(mapRef.current);
+
+                            const popupContent = `
+                                <div style="font-size: 12px; line-height: 1.5;">
+                                    <strong style="color: #2563eb;">ACI ${centro.CODICECD}</strong><br/>
+                                    <strong>${centro.RAGIONESOCIALE}</strong><br/>
+                                    <span style="color: #666;">${centro.INDIRIZZO}<br/>${centro.LOCALITA} (${centro.PROV}) ${centro.CAP}</span><br/>
+                                    <span style="color: #999; font-size: 10px;">Lat: ${centro.coordinates.lat.toFixed(5)}, Lng: ${centro.coordinates.lng.toFixed(5)}</span><br/>
+                                    <button 
+                                        onclick="window.selectCentroFromMap('${centro.CODICECD}')"
+                                        style="margin-top: 8px; padding: 4px 12px; background: #2563eb; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 11px;"
+                                    >
+                                        📍 Seleziona Centro
+                                    </button>
+                                </div>
+                            `;
+
+                            marker.bindPopup(popupContent);
+                            markerCount++;
+                        } catch (error) {
+                            console.error(`❌ Errore marker ${centro.CODICECD}:`, error, centro.coordinates);
+                        }
+                    });
+
+                    console.log(`✅ Aggiunti ${markerCount} marker sulla mappa`);
+
+                    // Centra mappa
+                    try {
+                        const validCoords = centriValidi.map(c => [c.coordinates.lat, c.coordinates.lng]);
+                        const bounds = L.latLngBounds(validCoords);
+                        mapRef.current.fitBounds(bounds, { padding: [50, 50] });
+                        console.log('✅ Mappa centrata su', validCoords.length, 'punti');
+                    } catch (error) {
+                        console.error('❌ Errore centratura mappa:', error);
+                    }
+                }
+            }, [centri, mapReady]);
+
+            useEffect(() => {
+                if (selectedCentro && selectedCentro.coordinates && mapRef.current) {
+                    if (selectedCentro.coordinates.lat && selectedCentro.coordinates.lng) {
+                        mapRef.current.setView(
+                            [selectedCentro.coordinates.lat, selectedCentro.coordinates.lng],
+                            12,
+                            { animate: true }
+                        );
+                        console.log('🗺️ Mappa centrata su:', selectedCentro.CODICECD, selectedCentro.coordinates);
+                    }
+                }
+            }, [selectedCentro]);
+
+            window.selectCentroFromMap = (codice) => {
+                const centro = centri.find(c => c.CODICECD === codice);
+                if (centro) {
+                    console.log('📍 Centro selezionato dalla mappa:', centro.CODICECD, centro.coordinates);
+                    setSelectedCentro(centro);
+                    setRisultati([]);
+                    setSelectedRegione(centro.REGIONE);
+                    setSelectedProvincia(centro.PROV);
+                }
+            };
+
+            const handleFileUpload = async (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+
+                setLoading(true);
+                setErrorMessage('');
+                setDebugInfo('');
+                setProgress('Lettura file Excel...');
+
+                try {
+                    const data = await file.arrayBuffer();
+                    const workbook = XLSX.read(data);
+
+                    const reteData = XLSX.utils.sheet_to_json(workbook.Sheets['Rete']);
+                    const incidentiData = XLSX.utils.sheet_to_json(workbook.Sheets['Incidenti']);
+
+                    console.log('📊 Dati caricati:', reteData.length, 'centri');
+
+                    setProgress(`Caricamento centri (0/${reteData.length})...`);
+                    const centriGeocoded = [];
+                    let fromFile = 0;
+                    let fromCache = 0;
+                    let fromOnline = 0;
+                    
+                    for (let i = 0; i < reteData.length; i++) {
+                        const centro = reteData[i];
+                        
+                        const address = `${centro.INDIRIZZO || ''}, ${centro.LOCALITA || ''}, ${centro.CAP || ''}, ${centro.PROV || ''}, Italia`;
+                        
+                        setProgress(`Caricamento centri (${i + 1}/${reteData.length})... ${centro.CODICECD}`);
+                        
+                        let coords = null;
+                        let source = '';
+                        
+                        // 1. Prima prova dal file Excel
+                        if (centro.Latitudine && centro.Longitudine) {
+                            coords = {
+                                lat: parseFloat(centro.Latitudine),
+                                lng: parseFloat(centro.Longitudine)
+                            };
+                            fromFile++;
+                            source = 'FILE';
+                            console.log(`📄 ${centro.CODICECD}: Coordinate dal file Excel`);
+                        }
+                        // 2. Poi prova dalla cache
+                        else if (cacheCoordinate[address]) {
+                            coords = cacheCoordinate[address];
+                            fromCache++;
+                            source = 'CACHE';
+                            console.log(`📦 ${centro.CODICECD}: Coordinate dalla cache`);
+                        }
+                        // 3. Infine geocodifica online
+                        else {
+                            coords = await geocodeWithCache(address);
+                            if (coords) {
+                                fromOnline++;
+                                source = 'API';
+                                console.log(`🌐 ${centro.CODICECD}: Geocodificato online`);
+                            }
+                        }
+                        
+                        if (coords) {
+                            centriGeocoded.push({
+                                ...centro,
+                                coordinates: coords,
+                                fullAddress: address,
+                                coordSource: source
+                            });
+                            console.log(`✓ ${centro.CODICECD}: [${coords.lat}, ${coords.lng}] (${source})`);
+                        } else {
+                            console.warn(`✗ ${centro.CODICECD}: Geocodifica fallita`);
+                        }
+                    }
+
+                    console.log(`✅ Centri caricati: ${centriGeocoded.length} (${fromFile} da file Excel, ${fromCache} da cache, ${fromOnline} da API)`);
+
+                    setProgress('Preparazione comuni...');
+                    const comuniPreparati = incidentiData.map(comune => ({
+                        ...comune,
+                        address: `${comune.Territorio}, ${comune.Provincia}, Italia`,
+                        coordinates: (comune.Latitudine && comune.Longitudine) ? {
+                            lat: parseFloat(comune.Latitudine),
+                            lng: parseFloat(comune.Longitudine)
+                        } : null
+                    }));
+
+                    setCentri(centriGeocoded);
+                    setComuni(comuniPreparati);
+                    setProgress('');
+                    setLoading(false);
+
+                    const comuniGiaGeocodificati = comuniPreparati.filter(c => c.coordinates).length;
+                    setDebugInfo(`✅ Caricati ${centriGeocoded.length} centri (${fromFile} da file Excel, ${fromCache} da cache, ${fromOnline} online). Comuni: ${comuniGiaGeocodificati}/${incidentiData.length}`);
+
+                } catch (error) {
+                    console.error('❌ Errore caricamento:', error);
+                    setErrorMessage('Errore: ' + error.message);
+                    setLoading(false);
+                    setProgress('');
+                }
+            };
+
+            // Modalità 1: Centro → Comuni
+            const elaboraDati = async () => {
+                if (!selectedCentro) {
+                    setErrorMessage('Seleziona un centro dalla mappa o dal menu');
+                    return;
+                }
+                
+                if (!selectedCentro.coordinates || !selectedCentro.coordinates.lat || !selectedCentro.coordinates.lng) {
+                    setErrorMessage('Il centro selezionato non ha coordinate valide');
+                    return;
+                }
+
+                setLoading(true);
+                setErrorMessage('');
+                setProgress('Elaborazione...');
+
+                try {
+                    const risultatiTemp = [];
+                    let comuniProcessati = 0;
+                    let comuniConCoordinate = 0;
+
+                    for (let i = 0; i < comuni.length; i++) {
+                        const comune = comuni[i];
+                        
+                        if (i % 100 === 0) {
+                            setProgress(`Elaborazione (${i}/${comuni.length})...`);
+                        }
+
+                        if (comune.coordinates && comune.coordinates.lat && comune.coordinates.lng && 
+                            comune.coordinates.lat !== 0 && comune.coordinates.lng !== 0) {
+                            
+                            comuniConCoordinate++;
+                            
+                            const distanzaKm = calcolaDistanza(
+                                selectedCentro.coordinates.lat,
+                                selectedCentro.coordinates.lng,
+                                comune.coordinates.lat,
+                                comune.coordinates.lng
+                            );
+
+                            const distanzaStimata = distanzaKm * moltiplicatore;
+
+                            if (distanzaStimata <= raggio) {
+                                const mediaIncidentiMese = (parseInt(comune.Incidenti) || 0) / 12;
+                                risultatiTemp.push({
+                                    ...comune,
+                                    Territorio: comune.Territorio || comune.Comune || '',
+                                    Comune: comune.Comune || comune.Territorio || '',
+                                    Provincia: comune.Provincia || comune.PROVINCIA || comune.PROV || '',
+                                    distanzaLineaAria: distanzaKm.toFixed(2),
+                                    distanzaStimata: distanzaStimata.toFixed(2),
+                                    mediaIncidentiMese: mediaIncidentiMese.toFixed(2),
+                                    Incidenti: comune.Incidenti || 0,
+                                    Soccorsi: comune.Soccorsi || 0,
+                                    Morti: comune.Morti || 0
+                                });
+                                comuniProcessati++;
+                            }
+                        }
+                    }
+
+                    risultatiTemp.sort((a, b) => parseFloat(a.distanzaStimata) - parseFloat(b.distanzaStimata));
+                    
+                    setRisultati(risultatiTemp);
+                    setSelectedComuni(risultatiTemp.map(() => true)); // Tutti selezionati di default
+                    setSortColumn(null); // Reset ordinamento
+                    setSortDirection('asc');
+                    setProgress('');
+                    setLoading(false);
+                    setDebugInfo(`✅ Trovati ${risultatiTemp.length} comuni entro ${raggio} km (${comuniConCoordinate} comuni con coordinate valide su ${comuni.length} totali)`);
+
+                } catch (error) {
+                    console.error('Errore elaborazione:', error);
+                    setErrorMessage('Errore: ' + error.message);
+                    setLoading(false);
+                    setProgress('');
+                }
+            };
+
+            // Modalità 2: Comune → Centri
+            const elaboraDatiInverso = async () => {
+                if (!selectedComune) {
+                    setErrorMessage('Seleziona un comune dalla lista');
+                    return;
+                }
+                
+                if (!selectedComune.coordinates || !selectedComune.coordinates.lat || !selectedComune.coordinates.lng) {
+                    setErrorMessage('Il comune selezionato non ha coordinate valide');
+                    return;
+                }
+
+                setLoading(true);
+                setErrorMessage('');
+                setProgress('Elaborazione centri...');
+
+                try {
+                    const risultatiTemp = [];
+                    let centriConCoordinate = 0;
+
+                    for (let i = 0; i < centri.length; i++) {
+                        const centro = centri[i];
+                        
+                        if (i % 50 === 0) {
+                            setProgress(`Elaborazione (${i}/${centri.length})...`);
+                        }
+
+                        if (centro.coordinates && centro.coordinates.lat && centro.coordinates.lng &&
+                            centro.coordinates.lat !== 0 && centro.coordinates.lng !== 0) {
+                            
+                            centriConCoordinate++;
+                            
+                            const distanzaKm = calcolaDistanza(
+                                selectedComune.coordinates.lat,
+                                selectedComune.coordinates.lng,
+                                centro.coordinates.lat,
+                                centro.coordinates.lng
+                            );
+
+                            const distanzaStimata = distanzaKm * moltiplicatore;
+
+                            if (distanzaStimata <= raggio) {
+                                risultatiTemp.push({
+                                    ...centro,
+                                    CODICECD: centro.CODICECD || '',
+                                    RAGIONESOCIALE: centro.RAGIONESOCIALE || '',
+                                    LOCALITA: centro.LOCALITA || '',
+                                    PROV: centro.PROV || '',
+                                    distanzaLineaAria: distanzaKm.toFixed(2),
+                                    distanzaStimata: distanzaStimata.toFixed(2)
+                                });
+                            }
+                        }
+                    }
+
+                    risultatiTemp.sort((a, b) => parseFloat(a.distanzaStimata) - parseFloat(b.distanzaStimata));
+                    
+                    setRisultatiCentri(risultatiTemp);
+                    setSelectedCentriRisultati(risultatiTemp.map(() => true)); // Tutti selezionati di default
+                    setSortColumnCentri(null); // Reset ordinamento
+                    setSortDirectionCentri('asc');
+                    setProgress('');
+                    setLoading(false);
+                    setDebugInfo(`✅ Trovati ${risultatiTemp.length} centri ACI entro ${raggio} km da ${selectedComune.Territorio || selectedComune.Comune} (${centriConCoordinate} centri con coordinate valide su ${centri.length} totali)`);
+
+                } catch (error) {
+                    console.error('Errore elaborazione inversa:', error);
+                    setErrorMessage('Errore: ' + error.message);
+                    setLoading(false);
+                    setProgress('');
+                }
+            };
+
+            const getRegioni = () => {
+                const regioni = [...new Set(centri.map(c => c.REGIONE))].filter(Boolean).sort();
+                return regioni;
+            };
+
+            const getProvince = (regione) => {
+                const province = [...new Set(
+                    centri
+                        .filter(c => c.REGIONE === regione)
+                        .map(c => c.PROV)
+                )].filter(Boolean).sort();
+                return province;
+            };
+
+            const getCentriFiltrati = () => {
+                let filtered = centri;
+                
+                if (selectedRegione) {
+                    filtered = filtered.filter(c => c.REGIONE === selectedRegione);
+                }
+                
+                if (selectedProvincia) {
+                    filtered = filtered.filter(c => c.PROV === selectedProvincia);
+                }
+                
+                return filtered;
+            };
+
+            const toggleField = (field) => {
+                setVisibleFields(prev => ({ ...prev, [field]: !prev[field] }));
+            };
+
+            const salvaCache = () => {
+                const dataStr = JSON.stringify(cacheCoordinate, null, 2);
+                const blob = new Blob([dataStr], { type: 'application/json' });
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(blob);
+                link.download = 'cache_coordinate.json';
+                link.click();
+            };
+
+            const caricaCache = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    try {
+                        const cache = JSON.parse(event.target.result);
+                        setCacheCoordinate(cache);
+                        
+                        let centriAggiornatiCount = 0;
+                        
+                        if (centri.length > 0) {
+                            const centriAggiornati = centri.map(centro => {
+                                const addressVariants = [
+                                    centro.fullAddress,
+                                    `${centro.INDIRIZZO || ''}, ${centro.LOCALITA || ''}, ${centro.CAP || ''}, ${centro.PROV || ''}, Italia`,
+                                    `${centro.INDIRIZZO}, ${centro.LOCALITA}, ${centro.CAP}, ${centro.PROV}, Italia`
+                                ];
+                                
+                                let coordsFromCache = null;
+                                for (const addr of addressVariants) {
+                                    if (addr && cache[addr]) {
+                                        coordsFromCache = cache[addr];
+                                        break;
+                                    }
+                                }
+                                
+                                if (coordsFromCache && coordsFromCache !== centro.coordinates) {
+                                    centriAggiornatiCount++;
+                                    console.log(`✓ Centro ${centro.CODICECD} aggiornato dalla cache`);
+                                }
+                                
+                                return {
+                                    ...centro,
+                                    coordinates: coordsFromCache || centro.coordinates
+                                };
+                            });
+                            
+                            setCentri([...centriAggiornati]);
+                            console.log(`✅ ${centriAggiornatiCount} centri aggiornati con cache`);
+                        }
+                        
+                        setDebugInfo(`✅ Cache caricata: ${Object.keys(cache).length} coordinate totali. ${centriAggiornatiCount} centri aggiornati.`);
+                    } catch (error) {
+                        setErrorMessage('Errore caricamento cache: ' + error.message);
+                    }
+                };
+                reader.readAsText(file);
+            };
+
+            // Funzione helper per convertire array di oggetti in CSV
+            const convertiInCSV = (dati) => {
+                if (dati.length === 0) return '';
+                
+                // Ottieni le intestazioni (chiavi del primo oggetto)
+                const headers = Object.keys(dati[0]);
+                
+                // Funzione per escapare valori CSV
+                const escapaValore = (val) => {
+                    if (val === null || val === undefined) return '';
+                    const str = String(val);
+                    // Se contiene virgola, virgolette o a capo, racchiudi tra virgolette
+                    if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+                        return '"' + str.replace(/"/g, '""') + '"';
+                    }
+                    return str;
+                };
+                
+                // Crea la riga di intestazione
+                const rigaIntestazione = headers.map(h => escapaValore(h)).join(',');
+                
+                // Crea le righe di dati
+                const righeDati = dati.map(obj => 
+                    headers.map(h => escapaValore(obj[h])).join(',')
+                );
+                
+                // Combina tutto
+                return [rigaIntestazione, ...righeDati].join('\n');
+            };
+
+            const esportaCSV = () => {
+                try {
+                    if (risultati.length === 0) {
+                        alert('Nessun risultato da esportare');
+                        return;
+                    }
+
+                    // Esporta solo i comuni selezionati
+                    const datiSelezionati = risultati.filter((_, idx) => selectedComuni[idx]);
+                    
+                    if (datiSelezionati.length === 0) {
+                        alert('Nessun comune selezionato. Seleziona almeno un comune da esportare.');
+                        return;
+                    }
+
+                    const csv = convertiInCSV(datiSelezionati);
+                    const BOM = '\uFEFF'; // UTF-8 BOM per Excel
+                    const blob = new Blob([BOM + csv], { type: 'text/csv;charset=utf-8;' });
+                    const link = document.createElement('a');
+                    const url = URL.createObjectURL(blob);
+                    link.href = url;
+                    link.download = `risultati_${selectedCentro.CODICECD}_${datiSelezionati.length}_comuni.csv`;
+                    link.style.display = 'none';
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                    URL.revokeObjectURL(url);
+                    
+                    setDebugInfo(`✅ Esportati ${datiSelezionati.length} comuni in CSV`);
+                } catch (error) {
+                    alert('Errore durante l\'esportazione: ' + error.message);
+                    console.error('Errore esportazione CSV:', error);
+                }
+            };
+
+            const esportaCSVCentri = () => {
+                try {
+                    if (risultatiCentri.length === 0) {
+                        alert('Nessun risultato da esportare');
+                        return;
+                    }
+
+                    // Esporta solo i centri selezionati
+                    const datiSelezionati = risultatiCentri.filter((_, idx) => selectedCentriRisultati[idx]);
+                    
+                    if (datiSelezionati.length === 0) {
+                        alert('Nessun centro selezionato. Seleziona almeno un centro da esportare.');
+                        return;
+                    }
+
+                    const csv = convertiInCSV(datiSelezionati);
+                    const BOM = '\uFEFF'; // UTF-8 BOM per Excel
+                    const blob = new Blob([BOM + csv], { type: 'text/csv;charset=utf-8;' });
+                    const link = document.createElement('a');
+                    const url = URL.createObjectURL(blob);
+                    link.href = url;
+                    link.download = `centri_${selectedComune?.Territorio || 'risultati'}_${datiSelezionati.length}_centri.csv`;
+                    link.style.display = 'none';
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                    URL.revokeObjectURL(url);
+                    
+                    setDebugInfo(`✅ Esportati ${datiSelezionati.length} centri in CSV`);
+                } catch (error) {
+                    alert('Errore durante l\'esportazione: ' + error.message);
+                    console.error('Errore esportazione CSV:', error);
+                }
+            };
+
+            return (
+                <div>
+                    <div className="bg-white shadow-sm border-b mb-6">
+                        <div className="max-w-7xl mx-auto px-6 py-4 flex justify-between items-center">
+                            <div className="flex items-center gap-4">
+                                <img src={LOGO_ACI_BASE64} alt="ACI" className="h-12" />
+                                <div>
+                                    <h1 className="text-xl font-bold">Analisi Geografica ACI v5.0</h1>
+                                    <p className="text-sm text-gray-600">👤 {userData.nome} {userData.cognome}</p>
+                                </div>
+                            </div>
+                            <div className="flex gap-2">
+                                <span className="px-3 py-1 bg-indigo-100 text-indigo-800 rounded-full text-sm font-medium">{userData.ruolo}</span>
+                                <button onClick={refreshCache} 
+                                    className="px-3 py-2 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 transition text-sm font-medium flex items-center gap-1"
+                                    title="Ricarica dati da Firebase">
+                                    🔄 Aggiorna DB
+                                </button>
+                                <button onClick={onLogout} className="px-4 py-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition font-medium">Esci</button>
+                            </div>
+                        </div>
+                    </div>
+
+                <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-4 md:p-6">
+                    <div className="max-w-7xl mx-auto">
+                        {/* Statistiche Database */}
+                        {(centri.length > 0 || comuni.length > 0) && (
+                            <>
+                                <div className="grid grid-cols-2 gap-4 mb-4">
+                                    <div className="bg-white rounded-lg shadow-lg p-4 border-l-4 border-indigo-500">
+                                        <div className="flex items-center justify-between">
+                                            <div>
+                                                <p className="text-gray-600 text-sm font-medium">Centri ACI</p>
+                                                <p className="text-3xl font-bold text-indigo-600">{centri.length}</p>
+                                            </div>
+                                            <div className="text-4xl">🏢</div>
+                                        </div>
+                                    </div>
+                                    <div className="bg-white rounded-lg shadow-lg p-4 border-l-4 border-green-500">
+                                        <div className="flex items-center justify-between">
+                                            <div>
+                                                <p className="text-gray-600 text-sm font-medium">Comuni Italiani</p>
+                                                <p className="text-3xl font-bold text-green-600">{comuni.length}</p>
+                                            </div>
+                                            <div className="text-4xl">🏘️</div>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                {/* Info Cache */}
+                                {(() => {
+                                    const cacheTimestamp = localStorage.getItem('aci_data_timestamp');
+                                    if (cacheTimestamp) {
+                                        const cacheDate = new Date(parseInt(cacheTimestamp));
+                                        const now = new Date();
+                                        const diffHours = Math.round((now - cacheDate) / 1000 / 60 / 60);
+                                        const diffMinutes = Math.round((now - cacheDate) / 1000 / 60);
+                                        const timeAgo = diffHours > 0 ? `${diffHours}h fa` : `${diffMinutes}min fa`;
+                                        
+                                        return (
+                                            <div className="bg-green-50 border-l-4 border-green-500 p-4 rounded-lg mb-4">
+                                                <div className="flex items-center justify-between">
+                                                    <div className="flex items-center gap-2">
+                                                        <span className="text-2xl">💾</span>
+                                                        <div>
+                                                            <p className="text-sm font-medium text-green-800">
+                                                                Dati caricati dalla cache locale
+                                                            </p>
+                                                            <p className="text-xs text-green-600">
+                                                                Ultima sincronizzazione: {cacheDate.toLocaleString('it-IT')} ({timeAgo}) • 
+                                                                <strong className="ml-1">0 letture Firebase consumate</strong> ✅
+                                                            </p>
+                                                        </div>
+                                                    </div>
+                                                    <button onClick={refreshCache} 
+                                                        className="px-3 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700 transition">
+                                                        Aggiorna ora
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        );
+                                    }
+                                })()}
+                            </>
+                        )}
+                        
+                        <h1 className="text-3xl md:text-4xl font-bold text-indigo-900 mb-2 text-center">
+                            🗺️ Analisi Geografica Rete ACI v5.0
+                        </h1>
+                        <p className="text-center text-gray-600 mb-6">
+                            {centri.length > 0 ? '✅ Database caricato correttamente' : '⏳ Caricamento database...'}
+                        </p>
+
+                        {/* Caricamento File */}
+                        <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
+                            <h2 className="text-xl font-semibold text-gray-800 mb-4">📁 Carica File Excel</h2>
+                            <input
+                                type="file"
+                                accept=".xlsx,.xls"
+                                onChange={handleFileUpload}
+                                disabled={loading}
+                                className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 disabled:opacity-50 mb-3"
+                            />
+
+                            <div className="flex flex-wrap gap-2">
+                                <button onClick={salvaCache} disabled={Object.keys(cacheCoordinate).length === 0}
+                                    className="px-3 py-2 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 disabled:bg-gray-400">
+                                    💾 Salva Cache ({Object.keys(cacheCoordinate).length})
+                                </button>
+                                <label className="px-3 py-2 bg-purple-600 text-white text-sm rounded-lg hover:bg-purple-700 cursor-pointer">
+                                    📥 Carica Cache
+                                    <input type="file" accept=".json" onChange={caricaCache} className="hidden" />
+                                </label>
+                            </div>
+                            
+                            <div className="mt-3 p-3 bg-blue-50 rounded border border-blue-200">
+                                <p className="text-xs text-blue-800">
+                                    <strong>💡 Priorità Caricamento:</strong><br/>
+                                    1️⃣ Coordinate dal <strong>file Excel</strong> (istantanee) ⚡<br/>
+                                    2️⃣ Coordinate dalla <strong>cache</strong> (se disponibili)<br/>
+                                    3️⃣ <strong>Geocoding online</strong> (solo se necessario)<br/>
+                                    💾 Carica la cache prima del file per massima velocità!
+                                </p>
+                            </div>
+
+                            {progress && <div className="mt-4 p-3 bg-blue-50 rounded-lg"><p className="text-indigo-600 font-medium text-sm">⏳ {progress}</p></div>}
+                            {errorMessage && <div className="mt-4 p-3 bg-red-50 border-l-4 border-red-500 rounded-lg"><p className="text-red-700 font-medium text-sm">❌ {errorMessage}</p></div>}
+                            {debugInfo && !errorMessage && <div className="mt-4 p-3 bg-green-50 border-l-4 border-green-500 rounded-lg"><p className="text-green-700 font-medium text-sm">{debugInfo}</p></div>}
+                            {errorMessage && <div className="mt-4 p-3 bg-red-50 rounded-lg"><p className="text-red-600 text-sm">⚠️ {errorMessage}</p></div>}
+                            {debugInfo && <div className="mt-4 p-3 bg-green-50 rounded-lg"><p className="text-green-700 text-sm">{debugInfo}</p></div>}
+                        </div>
+
+                        {/* Mappa */}
+                        <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
+                            <h2 className="text-xl font-semibold text-gray-800 mb-4">
+                                🗺️ Mappa Centri ACI {centri.length > 0 && `(${centri.length} centri)`}
+                            </h2>
+                            <div ref={mapContainerRef} className="map-container"></div>
+                            {centri.length > 0 && (
+                                <p className="text-xs text-gray-500 mt-2">
+                                    💡 Clicca sui marker (logo ACI) per selezionare un centro
+                                </p>
+                            )}
+                        </div>
+
+                        {(centri.length > 0 || comuni.length > 0) && (
+                            <>
+                                {/* TAB per modalità */}
+                                <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
+                                    <h2 className="text-xl font-semibold text-gray-800 mb-4">🔄 Seleziona Modalità</h2>
+                                    <div className="flex gap-2">
+                                        <button
+                                            onClick={() => {
+                                                setModalita('centro-comuni');
+                                                setRisultati([]);
+                                                setRisultatiCentri([]);
+                                            }}
+                                            className={`flex-1 px-4 py-3 rounded-lg font-medium transition ${
+                                                modalita === 'centro-comuni' ? 'tab-active' : 'tab-inactive'
+                                            }`}
+                                        >
+                                            📍 Centro → Comuni
+                                        </button>
+                                        <button
+                                            onClick={() => {
+                                                setModalita('comune-centri');
+                                                setRisultati([]);
+                                                setRisultatiCentri([]);
+                                            }}
+                                            className={`flex-1 px-4 py-3 rounded-lg font-medium transition ${
+                                                modalita === 'comune-centri' ? 'tab-active' : 'tab-inactive'
+                                            }`}
+                                        >
+                                            🏘️ Comune → Centri
+                                        </button>
+                                    </div>
+                                </div>
+
+                                {/* MODALITÀ 1: Centro → Comuni */}
+                                {modalita === 'centro-comuni' && (
+                                    <div className="grid md:grid-cols-2 gap-6">
+                                        <div className="space-y-6">
+                                            <div className="bg-white rounded-lg shadow-lg p-6">
+                                                <h2 className="text-xl font-semibold text-gray-800 mb-4">📍 Seleziona Centro ACI</h2>
+                                                
+                                                <div className="space-y-3">
+                                                    <div>
+                                                        <label className="block text-sm font-medium text-gray-700 mb-2">Regione</label>
+                                                        <select value={selectedRegione} onChange={(e) => { setSelectedRegione(e.target.value); setSelectedProvincia(''); }}
+                                                            className="w-full p-2 border rounded-lg text-sm">
+                                                            <option value="">Tutte le regioni</option>
+                                                            {getRegioni().map(r => <option key={r} value={r}>{r}</option>)}
+                                                        </select>
+                                                    </div>
+
+                                                    {selectedRegione && (
+                                                        <div>
+                                                            <label className="block text-sm font-medium text-gray-700 mb-2">Provincia</label>
+                                                            <select value={selectedProvincia} onChange={(e) => setSelectedProvincia(e.target.value)}
+                                                                className="w-full p-2 border rounded-lg text-sm">
+                                                                <option value="">Tutte le province</option>
+                                                                {getProvince(selectedRegione).map(p => <option key={p} value={p}>{p}</option>)}
+                                                            </select>
+                                                        </div>
+                                                    )}
+
+                                                    <div>
+                                                        <label className="block text-sm font-medium text-gray-700 mb-2">Centro</label>
+                                                        <select value={selectedCentro?.CODICECD || ''} 
+                                                            onChange={(e) => {
+                                                                const centro = centri.find(c => c.CODICECD === e.target.value);
+                                                                setSelectedCentro(centro);
+                                                                setRisultati([]);
+                                                            }}
+                                                            className="w-full p-2 border rounded-lg text-sm">
+                                                            <option value="">Seleziona...</option>
+                                                            {getCentriFiltrati().map(c => (
+                                                                <option key={c.CODICECD} value={c.CODICECD}>
+                                                                    {c.CODICECD} - {c.RAGIONESOCIALE}
+                                                                </option>
+                                                            ))}
+                                                        </select>
+                                                    </div>
+                                                </div>
+
+                                                {selectedCentro && (
+                                                    <div className="mt-4 p-4 bg-blue-50 rounded-lg">
+                                                        <h3 className="font-semibold text-gray-800 mb-2">📍 Centro Selezionato:</h3>
+                                                        <div className="text-sm space-y-1">
+                                                            <p><strong>Codice:</strong> {selectedCentro.CODICECD}</p>
+                                                            <p><strong>Ragione Sociale:</strong> {selectedCentro.RAGIONESOCIALE}</p>
+                                                            <p><strong>Indirizzo:</strong> {selectedCentro.INDIRIZZO}</p>
+                                                            <p><strong>Località:</strong> {selectedCentro.LOCALITA} ({selectedCentro.PROV})</p>
+                                                            <p><strong>Telefono:</strong> {selectedCentro.RECAPITOTELEFONICO}</p>
+                                                            <p><strong>Mail:</strong> {selectedCentro.MAIL}</p>
+                                                            <p><strong>Anga:</strong> {selectedCentro.ANGA}</p>
+                                                            <div className="mt-3 pt-3 border-t border-blue-200">
+                                                                <a 
+                                                                    href={`https://www.google.com/maps/search/?api=1&query=${selectedCentro.coordinates.lat},${selectedCentro.coordinates.lng}`}
+                                                                    target="_blank"
+                                                                    rel="noopener noreferrer"
+                                                                    className="inline-flex items-center px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors duration-200 shadow-sm hover:shadow-md"
+                                                                >
+                                                                    <svg className="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 24 24">
+                                                                        <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
+                                                                    </svg>
+                                                                    Apri in Google Maps
+                                                                </a>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </div>
+
+                                            <div className="bg-white rounded-lg shadow-lg p-6">
+                                                <h2 className="text-xl font-semibold text-gray-800 mb-4">⚙️ Configurazione</h2>
+                                                
+                                                <div className="space-y-3">
+                                                    <div>
+                                                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                                                            Raggio: {raggio} km
+                                                        </label>
+                                                        <input type="range" min="5" max="100" step="5" value={raggio}
+                                                            onChange={(e) => setRaggio(parseInt(e.target.value))} className="w-full" />
+                                                    </div>
+
+                                                    <div>
+                                                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                                                            Moltiplicatore: {moltiplicatore}x
+                                                        </label>
+                                                        <input type="range" min="1.0" max="2.0" step="0.1" value={moltiplicatore}
+                                                            onChange={(e) => setMoltiplicatore(parseFloat(e.target.value))} className="w-full" />
+                                                    </div>
+                                                </div>
+
+                                                <button onClick={elaboraDati} disabled={loading || !selectedCentro}
+                                                    className="w-full mt-4 px-6 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition disabled:bg-gray-400 disabled:cursor-not-allowed font-semibold">
+                                                    {loading ? '⏳ Elaborazione...' : '🚀 Trova Comuni'}
+                                                </button>
+                                            </div>
+                                        </div>
+
+                                        {risultati.length > 0 && (
+                                            <div className="bg-white rounded-lg shadow-lg p-6">
+                                                <div className="flex justify-between items-center mb-4">
+                                                    <h2 className="text-xl font-semibold text-gray-800">
+                                                        📊 Risultati ({calcolaTotali().count} di {risultati.length} comuni selezionati)
+                                                    </h2>
+                                                    <button onClick={esportaCSV}
+                                                        className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition text-sm">
+                                                        💾 Esporta CSV
+                                                    </button>
+                                                </div>
+
+                                                <div className="overflow-x-auto">
+                                                    <table className="min-w-full divide-y divide-gray-200 text-sm">
+                                                        <thead className="bg-gray-50">
+                                                            <tr>
+                                                                <th className="px-4 py-3 text-left">
+                                                                    <input 
+                                                                        type="checkbox" 
+                                                                        checked={selectedComuni.every(s => s)}
+                                                                        onChange={toggleAllComuni}
+                                                                        className="cursor-pointer"
+                                                                        title="Seleziona/Deseleziona tutti"
+                                                                    />
+                                                                </th>
+                                                                <th onClick={() => handleSort('Territorio')} 
+                                                                    className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer hover:bg-gray-100">
+                                                                    Comune {sortColumn === 'Territorio' && (sortDirection === 'asc' ? '↑' : '↓')}
+                                                                </th>
+                                                                <th onClick={() => handleSort('Provincia')} 
+                                                                    className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer hover:bg-gray-100">
+                                                                    Provincia {sortColumn === 'Provincia' && (sortDirection === 'asc' ? '↑' : '↓')}
+                                                                </th>
+                                                                <th onClick={() => handleSort('distanzaStimata')} 
+                                                                    className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer hover:bg-gray-100">
+                                                                    Dist. (km) {sortColumn === 'distanzaStimata' && (sortDirection === 'asc' ? '↑' : '↓')}
+                                                                </th>
+                                                                <th onClick={() => handleSort('Incidenti')} 
+                                                                    className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer hover:bg-gray-100">
+                                                                    Incidenti {sortColumn === 'Incidenti' && (sortDirection === 'asc' ? '↑' : '↓')}
+                                                                </th>
+                                                                <th onClick={() => handleSort('mediaIncidentiMese')} 
+                                                                    className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer hover:bg-gray-100">
+                                                                    Media Inc/Mese {sortColumn === 'mediaIncidentiMese' && (sortDirection === 'asc' ? '↑' : '↓')}
+                                                                </th>
+                                                                <th onClick={() => handleSort('Soccorsi')} 
+                                                                    className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer hover:bg-gray-100">
+                                                                    Soccorsi {sortColumn === 'Soccorsi' && (sortDirection === 'asc' ? '↑' : '↓')}
+                                                                </th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody className="bg-white divide-y divide-gray-200">
+                                                            {risultati.map((comune, idx) => (
+                                                                <tr key={idx} className={`hover:bg-gray-50 ${!selectedComuni[idx] ? 'opacity-50' : ''}`}>
+                                                                    <td className="px-4 py-3">
+                                                                        <input 
+                                                                            type="checkbox" 
+                                                                            checked={selectedComuni[idx]}
+                                                                            onChange={() => toggleComune(idx)}
+                                                                            className="cursor-pointer"
+                                                                        />
+                                                                    </td>
+                                                                    <td className="px-4 py-3 whitespace-nowrap font-medium text-gray-900">{comune.Territorio}</td>
+                                                                    <td className="px-4 py-3 whitespace-nowrap text-gray-500">{comune.Provincia}</td>
+                                                                    <td className="px-4 py-3 whitespace-nowrap text-indigo-600 font-medium">{comune.distanzaStimata}</td>
+                                                                    <td className="px-4 py-3 whitespace-nowrap text-gray-500">{comune.Incidenti}</td>
+                                                                    <td className="px-4 py-3 whitespace-nowrap text-orange-600 font-medium">{comune.mediaIncidentiMese}</td>
+                                                                    <td className="px-4 py-3 whitespace-nowrap text-gray-500">{comune.Soccorsi}</td>
+                                                                </tr>
+                                                            ))}
+                                                            <tr className="bg-indigo-50 font-bold border-t-2 border-indigo-600">
+                                                                <td className="px-4 py-3" colSpan="3">
+                                                                    TOTALI (comuni selezionati)
+                                                                </td>
+                                                                <td className="px-4 py-3 whitespace-nowrap text-indigo-600">
+                                                                    {calcolaTotali().count} comuni
+                                                                </td>
+                                                                <td className="px-4 py-3 whitespace-nowrap text-indigo-600">
+                                                                    {calcolaTotali().totIncidenti}
+                                                                </td>
+                                                                <td className="px-4 py-3 whitespace-nowrap text-orange-600">
+                                                                    {calcolaTotali().totMediaMensile.toFixed(2)}
+                                                                </td>
+                                                                <td className="px-4 py-3 whitespace-nowrap text-indigo-600">
+                                                                    {calcolaTotali().totSoccorsi}
+                                                                </td>
+                                                            </tr>
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+
+                                {/* MODALITÀ 2: Comune → Centri */}
+                                {modalita === 'comune-centri' && (
+                                    <div className="grid md:grid-cols-2 gap-6">
+                                        <div className="space-y-6">
+                                            <div className="bg-white rounded-lg shadow-lg p-6">
+                                                <h2 className="text-xl font-semibold text-gray-800 mb-4">🏘️ Seleziona Comune</h2>
+                                                
+                                                <div className="space-y-3">
+                                                    <div>
+                                                        <label className="block text-sm font-medium text-gray-700 mb-2">Comune</label>
+                                                        <select value={selectedComune?.Territorio || selectedComune?.Comune || ''} 
+                                                            onChange={(e) => {
+                                                                const comune = comuni.find(c => 
+                                                                    (c.Territorio === e.target.value || c.Comune === e.target.value)
+                                                                );
+                                                                if (comune) {
+                                                                    console.log('📍 Comune selezionato:', comune.Territorio || comune.Comune, comune.coordinates);
+                                                                    setSelectedComune(comune);
+                                                                    setRisultatiCentri([]);
+                                                                }
+                                                            }}
+                                                            className="w-full p-2 border rounded-lg text-sm">
+                                                            <option value="">Seleziona...</option>
+                                                            {comuni
+                                                                .filter(c => {
+                                                                    // Filtra comuni con coordinate valide e nome
+                                                                    const hasCoords = c.coordinates && c.coordinates.lat && c.coordinates.lng &&
+                                                                                     c.coordinates.lat !== 0 && c.coordinates.lng !== 0;
+                                                                    const hasName = c.Territorio || c.Comune;
+                                                                    return hasCoords && hasName;
+                                                                })
+                                                                .sort((a, b) => {
+                                                                    const nameA = (a.Territorio || a.Comune || '').toString();
+                                                                    const nameB = (b.Territorio || b.Comune || '').toString();
+                                                                    return nameA.localeCompare(nameB);
+                                                                })
+                                                                .map((c, idx) => {
+                                                                    const comuneName = c.Territorio || c.Comune || '';
+                                                                    const provincia = c.Provincia || c.PROVINCIA || c.PROV || '';
+                                                                    return (
+                                                                        <option key={`comune-${idx}-${comuneName}`} value={comuneName}>
+                                                                            {comuneName} {provincia ? `(${provincia})` : ''}
+                                                                        </option>
+                                                                    );
+                                                                })
+                                                            }
+                                                        </select>
+                                                        <p className="text-xs text-gray-500 mt-1">
+                                                            {comuni.filter(c => c.coordinates && c.coordinates.lat && c.coordinates.lng && 
+                                                                               c.coordinates.lat !== 0 && c.coordinates.lng !== 0 &&
+                                                                               (c.Territorio || c.Comune)).length} comuni disponibili
+                                                        </p>
+                                                    </div>
+                                                </div>
+
+                                                {selectedComune && (
+                                                    <div className="mt-4 p-4 bg-green-50 rounded-lg">
+                                                        <h3 className="font-semibold text-gray-800 mb-2">🏘️ Comune Selezionato:</h3>
+                                                        <div className="text-sm space-y-1">
+                                                            <p><strong>Comune:</strong> {selectedComune.Territorio || selectedComune.Comune}</p>
+                                                            <p><strong>Provincia:</strong> {selectedComune.Provincia || selectedComune.PROVINCIA || selectedComune.PROV}</p>
+                                                            <p><strong>Regione:</strong> {selectedComune.Regione || selectedComune.REGIONE}</p>
+                                                            <p><strong>Incidenti:</strong> {selectedComune.Incidenti || 0}</p>
+                                                            <p><strong>Soccorsi:</strong> {selectedComune.Soccorsi || 0}</p>
+                                                            <p className="text-xs text-gray-500 mt-2">
+                                                                📍 Coordinate: {selectedComune.coordinates?.lat?.toFixed(5)}, {selectedComune.coordinates?.lng?.toFixed(5)}
+                                                            </p>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </div>
+
+                                            <div className="bg-white rounded-lg shadow-lg p-6">
+                                                <h2 className="text-xl font-semibold text-gray-800 mb-4">⚙️ Configurazione</h2>
+                                                
+                                                <div className="space-y-3">
+                                                    <div>
+                                                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                                                            Raggio: {raggio} km
+                                                        </label>
+                                                        <input type="range" min="5" max="100" step="5" value={raggio}
+                                                            onChange={(e) => setRaggio(parseInt(e.target.value))} className="w-full" />
+                                                    </div>
+
+                                                    <div>
+                                                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                                                            Moltiplicatore: {moltiplicatore}x
+                                                        </label>
+                                                        <input type="range" min="1.0" max="2.0" step="0.1" value={moltiplicatore}
+                                                            onChange={(e) => setMoltiplicatore(parseFloat(e.target.value))} className="w-full" />
+                                                    </div>
+                                                </div>
+
+                                                <button onClick={elaboraDatiInverso} disabled={loading || !selectedComune}
+                                                    className="w-full mt-4 px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition disabled:bg-gray-400 disabled:cursor-not-allowed font-semibold">
+                                                    {loading ? '⏳ Elaborazione...' : '🚀 Trova Centri ACI'}
+                                                </button>
+                                            </div>
+                                        </div>
+
+                                        {risultatiCentri.length > 0 && (
+                                            <div className="bg-white rounded-lg shadow-lg p-6">
+                                                <div className="flex justify-between items-center mb-4">
+                                                    <h2 className="text-xl font-semibold text-gray-800">
+                                                        📊 Centri ACI Trovati ({selectedCentriRisultati.filter(s => s).length} di {risultatiCentri.length} selezionati)
+                                                    </h2>
+                                                    <button onClick={esportaCSVCentri}
+                                                        className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition text-sm">
+                                                        💾 Esporta CSV
+                                                    </button>
+                                                </div>
+
+                                                <div className="overflow-x-auto">
+                                                    <table className="min-w-full divide-y divide-gray-200 text-sm">
+                                                        <thead className="bg-gray-50">
+                                                            <tr>
+                                                                <th className="px-4 py-3 text-left">
+                                                                    <input 
+                                                                        type="checkbox" 
+                                                                        checked={selectedCentriRisultati.every(s => s)}
+                                                                        onChange={toggleAllCentri}
+                                                                        className="cursor-pointer"
+                                                                        title="Seleziona/Deseleziona tutti"
+                                                                    />
+                                                                </th>
+                                                                <th onClick={() => handleSortCentri('CODICECD')} 
+                                                                    className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer hover:bg-gray-100">
+                                                                    Codice {sortColumnCentri === 'CODICECD' && (sortDirectionCentri === 'asc' ? '↑' : '↓')}
+                                                                </th>
+                                                                <th onClick={() => handleSortCentri('RAGIONESOCIALE')} 
+                                                                    className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer hover:bg-gray-100">
+                                                                    Ragione Sociale {sortColumnCentri === 'RAGIONESOCIALE' && (sortDirectionCentri === 'asc' ? '↑' : '↓')}
+                                                                </th>
+                                                                <th onClick={() => handleSortCentri('LOCALITA')} 
+                                                                    className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer hover:bg-gray-100">
+                                                                    Località {sortColumnCentri === 'LOCALITA' && (sortDirectionCentri === 'asc' ? '↑' : '↓')}
+                                                                </th>
+                                                                <th onClick={() => handleSortCentri('PROV')} 
+                                                                    className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer hover:bg-gray-100">
+                                                                    Prov {sortColumnCentri === 'PROV' && (sortDirectionCentri === 'asc' ? '↑' : '↓')}
+                                                                </th>
+                                                                <th onClick={() => handleSortCentri('distanzaStimata')} 
+                                                                    className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer hover:bg-gray-100">
+                                                                    Dist. (km) {sortColumnCentri === 'distanzaStimata' && (sortDirectionCentri === 'asc' ? '↑' : '↓')}
+                                                                </th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody className="bg-white divide-y divide-gray-200">
+                                                            {risultatiCentri.map((centro, idx) => (
+                                                                <tr key={idx} className={`hover:bg-gray-50 ${!selectedCentriRisultati[idx] ? 'opacity-50' : ''}`}>
+                                                                    <td className="px-4 py-3">
+                                                                        <input 
+                                                                            type="checkbox" 
+                                                                            checked={selectedCentriRisultati[idx]}
+                                                                            onChange={() => toggleCentro(idx)}
+                                                                            className="cursor-pointer"
+                                                                        />
+                                                                    </td>
+                                                                    <td className="px-4 py-3 whitespace-nowrap font-medium text-blue-600">{centro.CODICECD}</td>
+                                                                    <td className="px-4 py-3 text-gray-900">{centro.RAGIONESOCIALE}</td>
+                                                                    <td className="px-4 py-3 whitespace-nowrap text-gray-500">{centro.LOCALITA}</td>
+                                                                    <td className="px-4 py-3 whitespace-nowrap text-gray-500">{centro.PROV}</td>
+                                                                    <td className="px-4 py-3 whitespace-nowrap text-indigo-600 font-medium">{centro.distanzaStimata}</td>
+                                                                </tr>
+                                                            ))}
+                                                            <tr className="bg-green-50 font-bold border-t-2 border-green-600">
+                                                                <td className="px-4 py-3" colSpan="5">
+                                                                    TOTALI (centri selezionati)
+                                                                </td>
+                                                                <td className="px-4 py-3 whitespace-nowrap text-green-600">
+                                                                    {selectedCentriRisultati.filter(s => s).length} centri
+                                                                </td>
+                                                            </tr>
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+                            </>
+                        )}
+                    </div>
+                </div>
+            
+                </div>
+            );
+        }
+
+        ReactDOM.render(<AppContainer />, document.getElementById('root'));
+</script>
+</body>
+</html>
