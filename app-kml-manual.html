@@ -447,41 +447,44 @@
                 });
             };
 
-            const loadKMLAuto = async () => {
-              const kmlFiles = ["kml/comuni.kml", "kml/comuni2.kml"];   // ← QUI I TUOI 2 FILE
-              const polygons = {};
-
-              try {
-                  for (const file of kmlFiles) {
-                      console.log("📥 Caricamento file KML:", file);
-
-                      const response = await fetch(file);
-                      if (!response.ok) {
-                          console.warn("⚠️ Errore nel file:", file);
-                          continue;
-                      }
-
-                      const kmlText = await response.text();
-                      const parser = new DOMParser();
-                      const xmlDoc = parser.parseFromString(kmlText, "text/xml");
-
-                      const placemarks = xmlDoc.getElementsByTagName("Placemark");
-
-                      for (let i = 0; i < placemarks.length; i++) {
-                          const placemark = placemarks[i];
-                          const nameElem = placemark.getElementsByTagName("name")[0];
-                          const coordsElem = placemark.getElementsByTagName("coordinates")[0];
-
-                          if (nameElem && coordsElem) {
-                              const name = nameElem.textContent.trim().toUpperCase();
-                              const coords = parseKMLCoordinates(coordsElem.textContent);
-
-                              // Se esiste già, aggiungi come multi-poligono
-                              if (!polygons[name]) polygons[name] = [];
-                              polygons[name].push(coords);
-                          }
-                      }
-                  }
+const loadKMLAuto = async () => {
+    try {
+        console.log('📥 Caricamento automatico KML da kml/comuni.kml...');
+        
+        const response = await fetch('kml/comuni.kml');
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        const kmlText = await response.text();
+        const parser = new DOMParser();
+        const xmlDoc = parser.parseFromString(kmlText, 'text/xml');
+        
+        const placemarks = xmlDoc.getElementsByTagName('Placemark');
+        const polygons = {};
+        
+        for (let i = 0; i < placemarks.length; i++) {
+            const placemark = placemarks[i];
+            const nameElem = placemark.getElementsByTagName('name')[0];
+            const coordsElem = placemark.getElementsByTagName('coordinates')[0];
+            
+            if (nameElem && coordsElem) {
+                const name = nameElem.textContent.trim().toUpperCase();
+                const coordinates = parseKMLCoordinates(coordsElem.textContent);
+                polygons[name] = coordinates;
+            }
+        }
+        
+        console.log(`✅ KML caricato automaticamente: ${Object.keys(polygons).length} comuni`);
+        setComuniPolygons(polygons);
+        return polygons;
+    } catch (error) {
+        console.error('❌ Errore caricamento KML automatico:', error);
+        console.log('💡 Assicurati che il file kml/comuni.kml esista nella stessa directory');
+        setErrorMessage('Errore caricamento KML: ' + error.message);
+        return {};
+    }
+};
 
                   console.log("✅ Totale comuni caricati dai KML:", Object.keys(polygons).length);
                   setComuniPolygons(polygons);
