@@ -621,12 +621,47 @@
                 const newSelected = [...selectedComuni];
                 newSelected[idx] = !newSelected[idx];
                 setSelectedComuni(newSelected);
+                
+                // Aggiorna poligoni sulla mappa mostrando solo i comuni selezionati
+                if (Object.keys(comuniPolygons).length > 0 && risultati.length > 0) {
+                    // Filtra solo i comuni selezionati
+                    const comuniSelezionati = risultati.filter((_, i) => newSelected[i]);
+                    console.log('🔄 Aggiornamento poligoni: mostro', comuniSelezionati.length, 'comuni selezionati su', risultati.length, 'totali');
+                    
+                    if (comuniSelezionati.length > 0) {
+                        showComuniPolygons(comuniSelezionati);
+                    } else {
+                        // Se nessun comune selezionato, rimuovi tutti i poligoni
+                        if (polygonLayerRef.current && mapRef.current) {
+                            mapRef.current.removeLayer(polygonLayerRef.current);
+                            polygonLayerRef.current = null;
+                            console.log('🗑️ Rimossi tutti i poligoni (nessun comune selezionato)');
+                        }
+                    }
+                }
             };
 
             // Toggle tutti i comuni
             const toggleAllComuni = () => {
                 const allSelected = selectedComuni.every(s => s);
-                setSelectedComuni(selectedComuni.map(() => !allSelected));
+                const newSelected = selectedComuni.map(() => !allSelected);
+                setSelectedComuni(newSelected);
+                
+                // Aggiorna poligoni sulla mappa
+                if (Object.keys(comuniPolygons).length > 0 && risultati.length > 0) {
+                    if (!allSelected) {
+                        // Se stiamo selezionando tutti, mostra tutti i poligoni
+                        console.log('🔄 Selezionati tutti i comuni, mostro tutti i poligoni');
+                        showComuniPolygons(risultati);
+                    } else {
+                        // Se stiamo deselezionando tutti, rimuovi tutti i poligoni
+                        if (polygonLayerRef.current && mapRef.current) {
+                            mapRef.current.removeLayer(polygonLayerRef.current);
+                            polygonLayerRef.current = null;
+                            console.log('🗑️ Rimossi tutti i poligoni (deselezionati tutti i comuni)');
+                        }
+                    }
+                }
             };
 
             // Toggle singolo centro
@@ -1232,6 +1267,20 @@
 
                     risultatiCentriTemp.sort((a, b) => parseFloat(a.distanzaStimata) - parseFloat(b.distanzaStimata));
                     risultatiComuniTemp.sort((a, b) => parseFloat(a.distanzaStimata) - parseFloat(b.distanzaStimata));
+                    
+                    // Aggiungi il comune selezionato all'inizio della lista comuni vicini
+                    const comuneSelezionatoItem = {
+                        Territorio: selectedComune.Territorio || selectedComune.Comune || '',
+                        Provincia: selectedComune.Provincia || selectedComune.PROVINCIA || selectedComune.PROV || '',
+                        Regione: selectedComune.Regione || selectedComune.REGIONE || '',
+                        Incidenti: selectedComune.Incidenti || 0,
+                        Soccorsi: selectedComune.Soccorsi || 0,
+                        Morti: selectedComune.Morti || 0,
+                        distanzaLineaAria: '0.00',
+                        distanzaStimata: '0.00',
+                        coordinates: selectedComune.coordinates
+                    };
+                    risultatiComuniTemp.unshift(comuneSelezionatoItem); // Aggiungi all'inizio
                     
                     setRisultatiCentri(risultatiCentriTemp);
                     setComuniVicini(risultatiComuniTemp);
