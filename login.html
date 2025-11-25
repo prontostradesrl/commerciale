@@ -26,8 +26,8 @@
     <div class="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-md">
         <!-- Logo -->
         <div class="flex justify-center mb-6">
-            <div class="w-20 h-20 bg-indigo-600 rounded-xl flex items-center justify-center">
-                <span class="text-white font-bold text-3xl">ACI</span>
+            <div class="w-34 h-28 bg-indigo-600 rounded-xl flex items-center justify-center">
+                <span class="text-white font-bold text-3xl">Pronto Strade</span>
             </div>
         </div>
 
@@ -50,14 +50,17 @@
                     placeholder="••••••••">
             </div>
 
+
+           
+
             <!-- GDPR Consent -->
             <div class="bg-blue-50 border border-blue-200 rounded-lg p-4">
                 <label class="flex items-start gap-3 cursor-pointer">
                     <input type="checkbox" id="gdprConsent" required class="mt-1">
                     <span class="text-sm text-gray-700">
                         Accetto il trattamento dei dati personali secondo quanto previsto dal 
-                        <a href="privacy.html" target="_blank" class="text-indigo-600 underline hover:text-indigo-800">GDPR</a> e la 
-                        <a href="privacy.html" target="_blank" class="text-indigo-600 underline hover:text-indigo-800">Privacy Policy</a>. *
+                        <a  target="_blank" class="text-indigo-600 underline hover:text-indigo-800">GDPR</a> e la 
+                        <a target="_blank" class="text-indigo-600 underline hover:text-indigo-800">Privacy Policy</a>. *
                     </span>
                 </label>
             </div>
@@ -88,14 +91,6 @@
                 <span>•</span>
                 <a href="cookie-policy.html" class="hover:text-gray-700">Cookie</a>
             </div>
-        </div>
-
-        <!-- Info Box -->
-        <div class="mt-6 bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-            <p class="text-xs text-gray-700">
-                <strong>ℹ️ Informativa:</strong> I tuoi dati sono protetti secondo gli standard GDPR. 
-                L'accesso è riservato al personale autorizzato ACI.
-            </p>
         </div>
     </div>
 
@@ -131,7 +126,11 @@
             hideError();
 
             try {
-                console.log('🔐 Tentativo di login...');
+                // IMPORTANTE: Usa SESSION persistence (scade chiudendo tab)
+                await auth.setPersistence(firebase.auth.Auth.Persistence.SESSION);
+                console.log('🔒 Persistenza: SESSION (scade chiudendo tab)');
+
+                // Login
                 const userCredential = await auth.signInWithEmailAndPassword(email, password);
                 console.log('✅ Login riuscito, UID:', userCredential.user.uid);
 
@@ -142,25 +141,33 @@
                     const userData = userDoc.data();
                     console.log('✅ Utente autorizzato:', userData);
 
-                    // Salva consenso GDPR con timestamp
-                    localStorage.setItem('gdprConsent', JSON.stringify({
+                    // Salva timestamp login per inattività
+                    sessionStorage.setItem('loginTimestamp', Date.now().toString());
+                    sessionStorage.setItem('lastActivity', Date.now().toString());
+                    
+                    console.log('💾 Session info salvata');
+
+                    // Salva consenso GDPR
+                    sessionStorage.setItem('gdprConsent', JSON.stringify({
                         accepted: true,
                         timestamp: new Date().toISOString(),
                         userId: userCredential.user.uid
                     }));
 
-                    // Log accesso per audit trail
+                    // Audit log
                     await db.collection('audit_logs').add({
                         userId: userCredential.user.uid,
                         email: userCredential.user.email,
                         action: 'login',
+                        sessionType: 'SESSION_WITH_INACTIVITY_30MIN',
                         timestamp: firebase.firestore.FieldValue.serverTimestamp(),
-                        ipAddress: 'client-side', // In produzione usare API per IP reale
+                        userAgent: navigator.userAgent,
                         gdprConsent: true
                     });
 
-                    // Redirect all'app
-                    window.location.href = 'app.html';
+                    // Redirect
+                    console.log('🚀 Redirect a app-kml-manual.html...');
+                    window.location.href = 'app-kml-manual.html';
                 } else {
                     console.error('❌ Utente non autorizzato');
                     await auth.signOut();
@@ -178,6 +185,8 @@
                     errorMsg = 'Troppi tentativi. Riprova più tardi';
                 } else if (error.code === 'auth/invalid-email') {
                     errorMsg = 'Email non valida';
+                } else if (error.code === 'auth/network-request-failed') {
+                    errorMsg = 'Errore di connessione. Verifica la rete';
                 }
                 
                 showError(errorMsg);
@@ -205,10 +214,10 @@
         }
 
         // Check if already logged in
-        auth.onAuthStateChanged(user => {
+        auth.onAuthStateChanged((user) => {
             if (user) {
                 console.log('👤 Utente già autenticato, redirect...');
-                window.location.href = 'app.html';
+                window.location.href = 'app-kml-manual.html';
             }
         });
     </script>
