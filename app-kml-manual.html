@@ -449,38 +449,58 @@
 
             const loadKMLAuto = async () => {
                 try {
-                    console.log('📥 Caricamento automatico KML da kml/comuni.kml...');
+                    console.log('📥 Caricamento automatico KML da comuni.kml e comuni2.kml...');
                     
-                    const response = await fetch('kml/comuni.kml');
-                    if (!response.ok) {
-                        throw new Error(`HTTP error! status: ${response.status}`);
-                    }
-                    
-                    const kmlText = await response.text();
-                    const parser = new DOMParser();
-                    const xmlDoc = parser.parseFromString(kmlText, 'text/xml');
-                    
-                    const placemarks = xmlDoc.getElementsByTagName('Placemark');
                     const polygons = {};
+                    const kmlFiles = ['kml/comuni.kml', 'kml/comuni2.kml'];
                     
-                    for (let i = 0; i < placemarks.length; i++) {
-                        const placemark = placemarks[i];
-                        const nameElem = placemark.getElementsByTagName('name')[0];
-                        const coordsElem = placemark.getElementsByTagName('coordinates')[0];
-                        
-                        if (nameElem && coordsElem) {
-                            const name = nameElem.textContent.trim().toUpperCase();
-                            const coordinates = parseKMLCoordinates(coordsElem.textContent);
-                            polygons[name] = coordinates;
+                    // Carica entrambi i file KML
+                    for (const kmlFile of kmlFiles) {
+                        try {
+                            console.log(`📂 Caricamento ${kmlFile}...`);
+                            const response = await fetch(kmlFile);
+                            
+                            if (!response.ok) {
+                                console.warn(`⚠️ File ${kmlFile} non trovato o errore ${response.status}`);
+                                continue; // Salta al prossimo file
+                            }
+                            
+                            const kmlText = await response.text();
+                            const parser = new DOMParser();
+                            const xmlDoc = parser.parseFromString(kmlText, 'text/xml');
+                            
+                            const placemarks = xmlDoc.getElementsByTagName('Placemark');
+                            let countInFile = 0;
+                            
+                            for (let i = 0; i < placemarks.length; i++) {
+                                const placemark = placemarks[i];
+                                const nameElem = placemark.getElementsByTagName('name')[0];
+                                const coordsElem = placemark.getElementsByTagName('coordinates')[0];
+                                
+                                if (nameElem && coordsElem) {
+                                    const name = nameElem.textContent.trim().toUpperCase();
+                                    const coordinates = parseKMLCoordinates(coordsElem.textContent);
+                                    
+                                    // Se il comune esiste già, non sovrascriverlo (priorità al primo file)
+                                    if (!polygons[name]) {
+                                        polygons[name] = coordinates;
+                                        countInFile++;
+                                    }
+                                }
+                            }
+                            
+                            console.log(`✅ ${kmlFile}: caricati ${countInFile} comuni`);
+                        } catch (fileError) {
+                            console.warn(`⚠️ Errore caricamento ${kmlFile}:`, fileError.message);
                         }
                     }
                     
-                    console.log(`✅ KML caricato automaticamente: ${Object.keys(polygons).length} comuni`);
+                    console.log(`✅ KML caricati: ${Object.keys(polygons).length} comuni totali`);
                     setComuniPolygons(polygons);
                     return polygons;
                 } catch (error) {
                     console.error('❌ Errore caricamento KML automatico:', error);
-                    console.log('💡 Assicurati che il file kml/comuni.kml esista nella stessa directory');
+                    console.log('💡 Assicurati che i file kml/comuni.kml e kml/comuni2.kml esistano nella stessa directory');
                     setErrorMessage('Errore caricamento KML: ' + error.message);
                     return {};
                 }
