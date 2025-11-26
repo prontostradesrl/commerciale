@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🏢 Gestione Centri Delegati - Pronto Strade</title>
+    
+    <!-- React -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+    
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <style>
+        .table-scroll {
+            max-height: calc(100vh - 300px);
+            overflow-y: auto;
+        }
+        .sticky-header th {
+            position: sticky;
+            top: 0;
+            background: white;
+            z-index: 10;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+    </style>
+</head>
+<body class="bg-gray-50">
+    <!-- Navbar -->
+    <div id="navbar-root"></div>
+    
+    <!-- Main Content -->
+    <div id="root"></div>
+
+    <!-- Navbar Component -->
+    <script src="navbar-component.js"></script>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        // Firebase Config
+        const firebaseConfig = {
+            apiKey: "AIzaSyDV_PzO4_PnR9xG9OXKHogE8TIophl9D-M",
+            authDomain: "analisi-commerciali.firebaseapp.com",
+            projectId: "analisi-commerciali",
+            storageBucket: "analisi-commerciali.firebasestorage.app",
+            messagingSenderId: "560138113336",
+            appId: "1:560138113336:web:d69384ff0bf3e20dbe71cd"
+        };
+
+        if (!firebase.apps.length) {
+            firebase.initializeApp(firebaseConfig);
+        }
+        const auth = firebase.auth();
+        const db = firebase.firestore();
+
+        function GestioneCentri() {
+            const [user, setUser] = useState(null);
+            const [loading, setLoading] = useState(true);
+            const [centri, setCentri] = useState([]);
+            const [filteredCentri, setFilteredCentri] = useState([]);
+            
+            // Filtri
+            const [searchTerm, setSearchTerm] = useState('');
+            const [filterLocalita, setFilterLocalita] = useState('all');
+            const [filterProvincia, setFilterProvincia] = useState('all');
+            const [filterRegione, setFilterRegione] = useState('all');
+            
+            // Editing
+            const [editingId, setEditingId] = useState(null);
+            const [editData, setEditData] = useState({});
+            const [saving, setSaving] = useState(false);
+            
+            // Stats
+            const [stats, setStats] = useState({
+                totali: 0,
+                conCoordinate: 0,
+                senzaCoordinate: 0
+            });
+
+            // Liste uniche
+            const [localita, setLocalita] = useState([]);
+            const [province, setProvince] = useState([]);
+            const [regioni, setRegioni] = useState([]);
+
+            // Auth check
+            useEffect(() => {
+                const unsubscribe = auth.onAuthStateChanged((firebaseUser) => {
+                    if (firebaseUser) {
+                        setUser(firebaseUser);
+                        window.mountNavbar(firebaseUser.email);
+                        loadCentri();
+                    } else {
+                        window.location.href = 'login.html';
+                    }
+                });
+                return () => unsubscribe();
+            }, []);
+
+            // Load data
+            const loadCentri = async () => {
+                setLoading(true);
+                try {
+                    const snapshot = await db.collection('centri').get();
+                    const data = snapshot.docs.map(doc => ({
+                        id: doc.id,
+                        ...doc.data()
+                    }));
+                    
+                    // Ordina per ragione sociale
+                    data.sort((a, b) => (a.RAGIONESOCIALE || '').localeCompare(b.RAGIONESOCIALE || ''));
+                    
+                    setCentri(data);
+                    
+                    // Estrai valori unici
+                    const uniqueLocalita = [...new Set(data.map(c => c.LOCALITA).filter(Boolean))].sort();
+                    const uniqueProvince = [...new Set(data.map(c => c.PROVINCIA).filter(Boolean))].sort();
+                    const uniqueRegioni = [...new Set(data.map(c => c.REGIONE).filter(Boolean))].sort();
+                    
+                    setLocalita(uniqueLocalita);
+                    setProvince(uniqueProvince);
+                    setRegioni(uniqueRegioni);
+                    
+                    calculateStats(data);
+                } catch (error) {
+                    alert(`Errore caricamento: ${error.message}`);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            // Calculate stats
+            const calculateStats = (data) => {
+                let conCoordinate = 0;
+                let senzaCoordinate = 0;
+                
+                data.forEach(c => {
+                    if (c.LAT && c.LON && c.LAT !== 0 && c.LON !== 0) {
+                        conCoordinate++;
+                    } else {
+                        senzaCoordinate++;
+                    }
+                });
+                
+                setStats({
+                    totali: data.length,
+                    conCoordinate,
+                    senzaCoordinate
+                });
+            };
+
+            // Apply filters
+            useEffect(() => {
+                let filtered = [...centri];
+                
+                // Filtro ricerca
+                if (searchTerm) {
+                    const term = searchTerm.toLowerCase();
+                    filtered = filtered.filter(c => 
+                        (c.RAGIONESOCIALE || '').toLowerCase().includes(term) ||
+                        (c.CODICECD || '').toLowerCase().includes(term) ||
+                        (c.INDIRIZZO || '').toLowerCase().includes(term) ||
+                        (c.LOCALITA || '').toLowerCase().includes(term)
+                    );
+                }
+                
+                // Filtro località
+                if (filterLocalita !== 'all') {
+                    filtered = filtered.filter(c => c.LOCALITA === filterLocalita);
+                }
+                
+                // Filtro provincia
+                if (filterProvincia !== 'all') {
+                    filtered = filtered.filter(c => c.PROVINCIA === filterProvincia);
+                }
+                
+                // Filtro regione
+                if (filterRegione !== 'all') {
+                    filtered = filtered.filter(c => c.REGIONE === filterRegione);
+                }
+                
+                setFilteredCentri(filtered);
+            }, [centri, searchTerm, filterLocalita, filterProvincia, filterRegione]);
+
+            // Start editing
+            const startEdit = (centro) => {
+                setEditingId(centro.id);
+                setEditData({
+                    LAT: centro.LAT || 0,
+                    LON: centro.LON || 0
+                });
+            };
+
+            // Cancel editing
+            const cancelEdit = () => {
+                setEditingId(null);
+                setEditData({});
+            };
+
+            // Save changes
+            const saveChanges = async (centroId) => {
+                setSaving(true);
+                try {
+                    const updateData = {
+                        LAT: parseFloat(editData.LAT) || 0,
+                        LON: parseFloat(editData.LON) || 0,
+                        lastModifiedBy: user.email,
+                        lastModifiedAt: firebase.firestore.FieldValue.serverTimestamp()
+                    };
+                    
+                    await db.collection('centri').doc(centroId).update(updateData);
+                    
+                    // Ricarica dati
+                    await loadCentri();
+                    
+                    setEditingId(null);
+                    setEditData({});
+                } catch (error) {
+                    alert(`Errore salvataggio: ${error.message}`);
+                } finally {
+                    setSaving(false);
+                }
+            };
+
+            // Format date
+            const formatDate = (data) => {
+                if (!data) return '-';
+                const date = data.toDate ? data.toDate() : new Date(data);
+                return date.toLocaleDateString('it-IT') + ' ' + date.toLocaleTimeString('it-IT', {hour: '2-digit', minute: '2-digit'});
+            };
+
+            if (loading) {
+                return (
+                    <div className="flex items-center justify-center min-h-screen">
+                        <div className="text-center">
+                            <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-indigo-600 mx-auto mb-4"></div>
+                            <p className="text-gray-600 text-lg">Caricamento centri...</p>
+                        </div>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="container mx-auto px-4 py-6">
+                    {/* Header */}
+                    <div className="mb-6">
+                        <h1 className="text-3xl font-bold text-gray-800 mb-2">🏢 Gestione Centri Delegati</h1>
+                        <p className="text-gray-600">Gestisci le coordinate geografiche dei centri Pronto Strade</p>
+                    </div>
+
+                    {/* Stats Cards */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                        <div className="bg-white rounded-lg shadow p-4">
+                            <div className="text-sm text-gray-600 mb-1">Centri Totali</div>
+                            <div className="text-2xl font-bold text-gray-800">{stats.totali}</div>
+                        </div>
+                        <div className="bg-green-50 rounded-lg shadow p-4">
+                            <div className="text-sm text-green-700 mb-1">Con Coordinate</div>
+                            <div className="text-2xl font-bold text-green-600">{stats.conCoordinate}</div>
+                        </div>
+                        <div className="bg-red-50 rounded-lg shadow p-4">
+                            <div className="text-sm text-red-700 mb-1">Senza Coordinate</div>
+                            <div className="text-2xl font-bold text-red-600">{stats.senzaCoordinate}</div>
+                        </div>
+                    </div>
+
+                    {/* Filters */}
+                    <div className="bg-white rounded-lg shadow p-4 mb-6">
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-3">
+                            {/* Search */}
+                            <input
+                                type="text"
+                                placeholder="🔍 Cerca centro..."
+                                value={searchTerm}
+                                onChange={(e) => setSearchTerm(e.target.value)}
+                                className="px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                            />
+                            
+                            {/* Filter Località */}
+                            <select
+                                value={filterLocalita}
+                                onChange={(e) => setFilterLocalita(e.target.value)}
+                                className="px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
+                            >
+                                <option value="all">Tutte le località</option>
+                                {localita.map(l => (
+                                    <option key={l} value={l}>{l}</option>
+                                ))}
+                            </select>
+                            
+                            {/* Filter Provincia */}
+                            <select
+                                value={filterProvincia}
+                                onChange={(e) => setFilterProvincia(e.target.value)}
+                                className="px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
+                            >
+                                <option value="all">Tutte le province</option>
+                                {province.map(p => (
+                                    <option key={p} value={p}>{p}</option>
+                                ))}
+                            </select>
+                            
+                            {/* Filter Regione */}
+                            <select
+                                value={filterRegione}
+                                onChange={(e) => setFilterRegione(e.target.value)}
+                                className="px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
+                            >
+                                <option value="all">Tutte le regioni</option>
+                                {regioni.map(r => (
+                                    <option key={r} value={r}>{r}</option>
+                                ))}
+                            </select>
+                            
+                            {/* Reset Filters */}
+                            <button
+                                onClick={() => {
+                                    setSearchTerm('');
+                                    setFilterLocalita('all');
+                                    setFilterProvincia('all');
+                                    setFilterRegione('all');
+                                }}
+                                className="px-3 py-2 bg-gray-200 hover:bg-gray-300 rounded-lg transition font-medium"
+                            >
+                                ↻ Reset
+                            </button>
+                        </div>
+                        <div className="mt-2 text-sm text-gray-600">
+                            Visualizzati: <span className="font-bold">{filteredCentri.length}</span> / {centri.length}
+                        </div>
+                    </div>
+
+                    {/* Table */}
+                    <div className="bg-white rounded-lg shadow overflow-hidden">
+                        <div className="table-scroll">
+                            <table className="min-w-full divide-y divide-gray-200">
+                                <thead className="sticky-header">
+                                    <tr>
+                                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Codice</th>
+                                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Ragione Sociale</th>
+                                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Indirizzo</th>
+                                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Località</th>
+                                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Prov</th>
+                                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Coordinate</th>
+                                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Ultimo Aggiornamento</th>
+                                        <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Azioni</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="bg-white divide-y divide-gray-200">
+                                    {filteredCentri.map(centro => (
+                                        <tr key={centro.id} className="hover:bg-gray-50">
+                                            {editingId === centro.id ? (
+                                                <>
+                                                    {/* Read-only info */}
+                                                    <td className="px-4 py-3 text-sm font-mono text-gray-900">{centro.CODICECD}</td>
+                                                    <td className="px-4 py-3 text-sm font-medium text-gray-900">{centro.RAGIONESOCIALE}</td>
+                                                    <td className="px-4 py-3 text-sm text-gray-700">{centro.INDIRIZZO}</td>
+                                                    <td className="px-4 py-3 text-sm text-gray-700">{centro.LOCALITA}</td>
+                                                    <td className="px-4 py-3 text-sm text-gray-700">{centro.PROVINCIA}</td>
+                                                    
+                                                    {/* Editable: Coordinate */}
+                                                    <td className="px-4 py-3">
+                                                        <div className="space-y-1">
+                                                            <input
+                                                                type="number"
+                                                                step="0.000001"
+                                                                placeholder="Latitudine"
+                                                                value={editData.LAT}
+                                                                onChange={(e) => setEditData({...editData, LAT: e.target.value})}
+                                                                className="w-full px-2 py-1 text-sm border rounded focus:ring-2 focus:ring-indigo-500"
+                                                            />
+                                                            <input
+                                                                type="number"
+                                                                step="0.000001"
+                                                                placeholder="Longitudine"
+                                                                value={editData.LON}
+                                                                onChange={(e) => setEditData({...editData, LON: e.target.value})}
+                                                                className="w-full px-2 py-1 text-sm border rounded focus:ring-2 focus:ring-indigo-500"
+                                                            />
+                                                        </div>
+                                                    </td>
+                                                    
+                                                    <td className="px-4 py-3"></td>
+                                                    
+                                                    {/* Actions */}
+                                                    <td className="px-4 py-3 text-center">
+                                                        <div className="flex gap-2 justify-center">
+                                                            <button
+                                                                onClick={() => saveChanges(centro.id)}
+                                                                disabled={saving}
+                                                                className="px-3 py-1 bg-green-600 hover:bg-green-700 text-white text-sm rounded transition disabled:opacity-50"
+                                                            >
+                                                                {saving ? '...' : '✓ Salva'}
+                                                            </button>
+                                                            <button
+                                                                onClick={cancelEdit}
+                                                                disabled={saving}
+                                                                className="px-3 py-1 bg-gray-400 hover:bg-gray-500 text-white text-sm rounded transition"
+                                                            >
+                                                                ✕ Annulla
+                                                            </button>
+                                                        </div>
+                                                    </td>
+                                                </>
+                                            ) : (
+                                                <>
+                                                    {/* Display Mode */}
+                                                    <td className="px-4 py-3 text-sm font-mono text-gray-900">{centro.CODICECD}</td>
+                                                    <td className="px-4 py-3 text-sm font-medium text-gray-900">{centro.RAGIONESOCIALE}</td>
+                                                    <td className="px-4 py-3 text-sm text-gray-700">{centro.INDIRIZZO}</td>
+                                                    <td className="px-4 py-3 text-sm text-gray-700">{centro.LOCALITA}</td>
+                                                    <td className="px-4 py-3 text-sm text-gray-700">{centro.PROVINCIA}</td>
+                                                    <td className="px-4 py-3 text-sm">
+                                                        {centro.LAT && centro.LON && centro.LAT !== 0 && centro.LON !== 0 ? (
+                                                            <div className="text-gray-700">
+                                                                <div>Lat: {centro.LAT.toFixed(6)}</div>
+                                                                <div>Lon: {centro.LON.toFixed(6)}</div>
+                                                            </div>
+                                                        ) : (
+                                                            <span className="text-red-500 font-medium">⚠️ Non impostate</span>
+                                                        )}
+                                                    </td>
+                                                    <td className="px-4 py-3 text-xs text-gray-500">
+                                                        {centro.lastModifiedBy ? (
+                                                            <div>
+                                                                <div className="font-medium">{centro.lastModifiedBy}</div>
+                                                                <div>{centro.lastModifiedAt ? formatDate(centro.lastModifiedAt) : '-'}</div>
+                                                            </div>
+                                                        ) : (
+                                                            <span className="text-gray-400">-</span>
+                                                        )}
+                                                    </td>
+                                                    <td className="px-4 py-3 text-center">
+                                                        <button
+                                                            onClick={() => startEdit(centro)}
+                                                            className="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white text-sm rounded transition"
+                                                        >
+                                                            ✎ Modifica
+                                                        </button>
+                                                    </td>
+                                                </>
+                                            )}
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    {/* Info Box */}
+                    <div className="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
+                        <h3 className="font-bold text-blue-900 mb-2">ℹ️ Informazioni</h3>
+                        <ul className="text-sm text-blue-800 space-y-1">
+                            <li>• Puoi modificare solo le <strong>coordinate geografiche</strong> (Latitudine e Longitudine)</li>
+                            <li>• Le modifiche vengono tracciate automaticamente con email utente e timestamp</li>
+                            <li>• I centri senza coordinate sono evidenziati in rosso</li>
+                            <li>• Usa i filtri per trovare rapidamente i centri di interesse</li>
+                            <li>• Le coordinate devono essere in formato decimale (es: 45.464211, 9.189898)</li>
+                        </ul>
+                    </div>
+                </div>
+            );
+        }
+
+        // Mount app
+        ReactDOM.render(<GestioneCentri />, document.getElementById('root'));
+    </script>
+</body>
+</html>

@@ -36,7 +36,14 @@
 
 </head>
 <body>
+    <!-- Navbar -->
+    <div id="navbar-root"></div>
+    
+    <!-- Main Content -->
     <div id="root"></div>
+
+    <!-- Navbar Component -->
+    <script src="navbar-component.js"></script>
 
     <script type="text/babel">
 
@@ -155,6 +162,8 @@
                         if (doc.exists) {
                             setUser(firebaseUser);
                             setUserData(doc.data());
+                            // Monta la navbar con email utente
+                            window.mountNavbar(firebaseUser.email);
                         }
                     }
                     setLoading(false);
@@ -196,6 +205,7 @@
             const [comuni, setComuni] = useState([]);
             const [selectedCentro, setSelectedCentro] = useState(null);
             const [selectedComune, setSelectedComune] = useState(null);
+            const [searchComune, setSearchComune] = useState(''); // Filtro ricerca comuni
             const [raggio, setRaggio] = useState(20);
             const [moltiplicatore, setMoltiplicatore] = useState(1.3);
             const [risultati, setRisultati] = useState([]);
@@ -1522,18 +1532,18 @@
 
             return (
                 <div>
+                    {/* Info Bar sotto la navbar */}
                     <div className="bg-white shadow-sm border-b mb-6">
-                        <div className="max-w-7xl mx-auto px-6 py-4 flex justify-between items-center">
-                            <div className="flex items-center gap-4">
-                                <img src={LOGO_ACI_BASE64} alt="Pronto Strade" className="h-12" />
-                                <div>
-                                    <h1 className="text-xl font-bold">Analisi Geografica Pronto Strade v5.0</h1>
-                                    <p className="text-sm text-gray-600">👤 {userData.nome} {userData.cognome}</p>
+                        <div className="max-w-7xl mx-auto px-6 py-3 flex justify-between items-center">
+                            <div className="flex items-center gap-3">
+                                <img src={LOGO_ACI_BASE64} alt="Pronto Strade" className="h-10" />
+                                <div className="text-sm">
+                                    <span className="text-gray-600">👤 {userData.nome} {userData.cognome}</span>
+                                    <span className="mx-2 text-gray-300">•</span>
+                                    <span className="px-2 py-1 bg-indigo-100 text-indigo-800 rounded text-xs font-medium">{userData.ruolo}</span>
                                 </div>
                             </div>
                             <div className="flex gap-2">
-                                <span className="px-3 py-1 bg-indigo-100 text-indigo-800 rounded-full text-sm font-medium">{userData.ruolo}</span>
-                                
                                 {/* KML Status Badge */}
                                 {Object.keys(comuniPolygons).length > 0 && (
                                     <span className="px-3 py-2 bg-green-50 text-green-600 rounded-lg text-sm font-medium flex items-center gap-2">
@@ -1546,7 +1556,6 @@
                                     title="Ricarica dati da Firebase">
                                     🔄 Aggiorna DB
                                 </button>
-                                <button onClick={onLogout} className="px-4 py-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition font-medium">Esci</button>
                             </div>
                         </div>
                     </div>
@@ -1938,6 +1947,28 @@
                                                 <h2 className="text-xl font-semibold text-gray-800 mb-4">🏘️ Seleziona Comune</h2>
                                                 
                                                 <div className="space-y-3">
+                                                    {/* Input di ricerca */}
+                                                    <div>
+                                                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                                                            🔍 Cerca Comune
+                                                        </label>
+                                                        <input
+                                                            type="text"
+                                                            placeholder="Digita per filtrare..."
+                                                            value={searchComune}
+                                                            onChange={(e) => setSearchComune(e.target.value)}
+                                                            className="w-full p-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                                                        />
+                                                        {searchComune && (
+                                                            <button
+                                                                onClick={() => setSearchComune('')}
+                                                                className="mt-1 text-xs text-gray-500 hover:text-gray-700"
+                                                            >
+                                                                ✕ Cancella filtro
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                    
                                                     <div>
                                                         <label className="block text-sm font-medium text-gray-700 mb-2">Comune</label>
                                                         <select value={selectedComune?.Territorio || selectedComune?.Comune || ''} 
@@ -1959,7 +1990,16 @@
                                                                     const hasCoords = c.coordinates && c.coordinates.lat && c.coordinates.lng &&
                                                                                      c.coordinates.lat !== 0 && c.coordinates.lng !== 0;
                                                                     const hasName = c.Territorio || c.Comune;
-                                                                    return hasCoords && hasName;
+                                                                    
+                                                                    // Filtro ricerca
+                                                                    const comuneName = (c.Territorio || c.Comune || '').toLowerCase();
+                                                                    const provincia = (c.Provincia || c.PROVINCIA || c.PROV || '').toLowerCase();
+                                                                    const searchLower = searchComune.toLowerCase();
+                                                                    const matchesSearch = !searchComune || 
+                                                                        comuneName.includes(searchLower) || 
+                                                                        provincia.includes(searchLower);
+                                                                    
+                                                                    return hasCoords && hasName && matchesSearch;
                                                                 })
                                                                 .sort((a, b) => {
                                                                     const nameA = (a.Territorio || a.Comune || '').toString();
@@ -1978,9 +2018,18 @@
                                                             }
                                                         </select>
                                                         <p className="text-xs text-gray-500 mt-1">
-                                                            {comuni.filter(c => c.coordinates && c.coordinates.lat && c.coordinates.lng && 
-                                                                               c.coordinates.lat !== 0 && c.coordinates.lng !== 0 &&
-                                                                               (c.Territorio || c.Comune)).length} comuni disponibili
+                                                            {comuni.filter(c => {
+                                                                const hasCoords = c.coordinates && c.coordinates.lat && c.coordinates.lng && 
+                                                                                 c.coordinates.lat !== 0 && c.coordinates.lng !== 0;
+                                                                const hasName = c.Territorio || c.Comune;
+                                                                const comuneName = (c.Territorio || c.Comune || '').toLowerCase();
+                                                                const provincia = (c.Provincia || c.PROVINCIA || c.PROV || '').toLowerCase();
+                                                                const searchLower = searchComune.toLowerCase();
+                                                                const matchesSearch = !searchComune || 
+                                                                    comuneName.includes(searchLower) || 
+                                                                    provincia.includes(searchLower);
+                                                                return hasCoords && hasName && matchesSearch;
+                                                            }).length} comuni {searchComune ? `trovati per "${searchComune}"` : 'disponibili'}
                                                         </p>
                                                     </div>
                                                 </div>

@@ -1,0 +1,767 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🔄 Sync Intelligente Firebase</title>
+    
+    <!-- Script necessari -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        // ⚠️ SOSTITUISCI CON LE TUE CREDENZIALI FIREBASE!
+        const firebaseConfig = {
+            apiKey: "AIzaSyDV_PzO4_PnR9xG9OXKHogE8TIophl9D-M",  // ⚠️ SOSTITUISCI!
+            authDomain: "analisi-commerciali.firebaseapp.com",
+            projectId: "analisi-commerciali",
+            storageBucket: "analisi-commerciali.firebasestorage.app",
+            messagingSenderId: "560138113336",
+            appId: "1:560138113336:web:d69384ff0bf3e20dbe71cd"
+        };
+
+        // Inizializza Firebase
+        firebase.initializeApp(firebaseConfig);
+        const auth = firebase.auth();
+        const db = firebase.firestore();
+
+        function SyncTool() {
+            const [user, setUser] = useState(null);
+            const [email, setEmail] = useState('');
+            const [password, setPassword] = useState('');
+            const [loading, setLoading] = useState(false);
+            
+            // Stato sync
+            const [syncing, setSyncing] = useState(false);
+            const [analyzing, setAnalyzing] = useState(false);
+            const [syncReport, setSyncReport] = useState(null);
+            const [logs, setLogs] = useState([]);
+            
+            // Opzioni sync
+            const [deleteObsolete, setDeleteObsolete] = useState(false);
+            const [syncComuni, setSyncComuni] = useState(true);
+            const [dryRun, setDryRun] = useState(false);
+            
+            // Dati
+            const [excelData, setExcelData] = useState(null);
+            const [firestoreData, setFirestoreData] = useState(null);
+
+            useEffect(() => {
+                const unsubscribe = auth.onAuthStateChanged((firebaseUser) => {
+                    setUser(firebaseUser);
+                });
+                return () => unsubscribe();
+            }, []);
+
+            const addLog = (message, type = 'info') => {
+                const timestamp = new Date().toLocaleTimeString('it-IT');
+                setLogs(prev => [...prev, { time: timestamp, message, type }]);
+            };
+
+            const handleLogin = async (e) => {
+                e.preventDefault();
+                setLoading(true);
+                try {
+                    await auth.signInWithEmailAndPassword(email, password);
+                    addLog('✅ Login effettuato con successo!', 'success');
+                } catch (error) {
+                    addLog(`❌ Errore login: ${error.message}`, 'error');
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            const compareData = (excelCentri, firestoreCentri, excelComuni, firestoreComuni) => {
+                // Crea mappe per confronto veloce
+                const excelCentriMap = new Map();
+                excelCentri.forEach(c => {
+                    const key = c.CODICECD || `unknown_${Math.random()}`;
+                    excelCentriMap.set(key, c);
+                });
+
+                const firestoreCentriMap = new Map();
+                firestoreCentri.forEach(c => {
+                    const key = c.CODICECD;
+                    firestoreCentriMap.set(key, c);
+                });
+
+                const excelComuniMap = new Map();
+                excelComuni.forEach(c => {
+                    const key = c.Territorio;
+                    excelComuniMap.set(key, c);
+                });
+
+                const firestoreComuniMap = new Map();
+                firestoreComuni.forEach(c => {
+                    const key = c.Comune;
+                    firestoreComuniMap.set(key, c);
+                });
+
+                // Analizza centri
+                const centriNuovi = [];
+                const centriModificati = [];
+                const centriInvariati = [];
+
+                excelCentri.forEach(excelCentro => {
+                    const key = excelCentro.CODICECD;
+                    if (!firestoreCentriMap.has(key)) {
+                        centriNuovi.push(excelCentro);
+                    } else {
+                        const firestoreCentro = firestoreCentriMap.get(key);
+                        // Confronto semplificato (puoi personalizzare)
+                        const isModified = 
+                            excelCentro.RAGIONESOCIALE !== firestoreCentro.RAGIONESOCIALE ||
+                            excelCentro.LOCALITA !== firestoreCentro.LOCALITA ||
+                            excelCentro.INDIRIZZO !== firestoreCentro.INDIRIZZO ||
+                            parseFloat(excelCentro.Latitudine) !== firestoreCentro.LAT ||
+                            parseFloat(excelCentro.Longitudine) !== firestoreCentro.LON;
+                        
+                        if (isModified) {
+                            centriModificati.push({ old: firestoreCentro, new: excelCentro });
+                        } else {
+                            centriInvariati.push(excelCentro);
+                        }
+                    }
+                });
+
+                const centriDaEliminare = [];
+                firestoreCentri.forEach(firestoreCentro => {
+                    if (!excelCentriMap.has(firestoreCentro.CODICECD)) {
+                        centriDaEliminare.push(firestoreCentro);
+                    }
+                });
+
+                // Analizza comuni (stessa logica)
+                const comuniNuovi = [];
+                const comuniModificati = [];
+                const comuniInvariati = [];
+                const comuniDaEliminare = [];
+
+                excelComuni.forEach(excelComune => {
+                    const key = excelComune.Territorio;
+                    if (!firestoreComuniMap.has(key)) {
+                        comuniNuovi.push(excelComune);
+                    } else {
+                        const firestoreComune = firestoreComuniMap.get(key);
+                        const isModified = 
+                            excelComune.Provincia !== firestoreComune.Provincia ||
+                            excelComune.Regione !== firestoreComune.Regione ||
+                            parseInt(excelComune.Incidenti) !== firestoreComune.Incidenti ||
+                            parseInt(excelComune.Soccorsi) !== firestoreComune.Soccorsi;
+                        
+                        if (isModified) {
+                            comuniModificati.push({ old: firestoreComune, new: excelComune });
+                        } else {
+                            comuniInvariati.push(excelComune);
+                        }
+                    }
+                });
+
+                firestoreComuni.forEach(firestoreComune => {
+                    if (!excelComuniMap.has(firestoreComune.Comune)) {
+                        comuniDaEliminare.push(firestoreComune);
+                    }
+                });
+
+                return {
+                    centri: {
+                        nuovi: centriNuovi,
+                        modificati: centriModificati,
+                        invariati: centriInvariati,
+                        daEliminare: centriDaEliminare
+                    },
+                    comuni: {
+                        nuovi: comuniNuovi,
+                        modificati: comuniModificati,
+                        invariati: comuniInvariati,
+                        daEliminare: comuniDaEliminare
+                    }
+                };
+            };
+
+            const handleFileUpload = async (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+
+                setAnalyzing(true);
+                setLogs([]);
+                setSyncReport(null);
+
+                try {
+                    addLog(`📁 Lettura file: ${file.name}`, 'info');
+                    
+                    const reader = new FileReader();
+                    reader.onload = async (evt) => {
+                        try {
+                            const data = evt.target.result;
+                            const workbook = XLSX.read(data, { type: 'binary' });
+
+                            // Leggi Excel
+                            const centriExcel = workbook.SheetNames.includes('Rete') 
+                                ? XLSX.utils.sheet_to_json(workbook.Sheets['Rete'])
+                                : [];
+                            
+                            const comuniExcel = workbook.SheetNames.includes('Incidenti')
+                                ? XLSX.utils.sheet_to_json(workbook.Sheets['Incidenti'])
+                                : [];
+
+                            addLog(`📊 Letti ${centriExcel.length} centri e ${comuniExcel.length} comuni da Excel`, 'info');
+
+                            // Leggi Firestore
+                            addLog(`📊 Caricamento dati da Firestore...`, 'info');
+                            const centriSnapshot = await db.collection('centri').get();
+                            const centriFirestore = centriSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+                            const comuniSnapshot = await db.collection('comuni').get();
+                            const comuniFirestore = comuniSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+                            addLog(`📊 Trovati ${centriFirestore.length} centri e ${comuniFirestore.length} comuni in Firestore`, 'info');
+
+                            // Confronta
+                            addLog(`🔍 Analisi differenze in corso...`, 'info');
+                            const report = compareData(centriExcel, centriFirestore, comuniExcel, comuniFirestore);
+
+                            setSyncReport(report);
+                            setExcelData({ centri: centriExcel, comuni: comuniExcel });
+                            setFirestoreData({ centri: centriFirestore, comuni: comuniFirestore });
+
+                            addLog(`✅ Analisi completata!`, 'success');
+                            addLog(`📊 Centri: ${report.centri.nuovi.length} nuovi, ${report.centri.modificati.length} modificati, ${report.centri.daEliminare.length} da eliminare`, 'info');
+                            addLog(`📊 Comuni: ${report.comuni.nuovi.length} nuovi, ${report.comuni.modificati.length} modificati, ${report.comuni.daEliminare.length} da eliminare`, 'info');
+
+                        } catch (error) {
+                            addLog(`❌ Errore analisi: ${error.message}`, 'error');
+                        } finally {
+                            setAnalyzing(false);
+                        }
+                    };
+
+                    reader.readAsBinaryString(file);
+                } catch (error) {
+                    addLog(`❌ Errore lettura file: ${error.message}`, 'error');
+                    setAnalyzing(false);
+                }
+            };
+
+            const executeSync = async () => {
+                if (!syncReport) return;
+
+                setSyncing(true);
+                addLog(`🚀 ${dryRun ? 'SIMULAZIONE' : 'ESECUZIONE'} sync iniziata...`, 'info');
+
+                let stats = {
+                    centriAggiunti: 0,
+                    centriModificati: 0,
+                    centriEliminati: 0,
+                    comuniAggiunti: 0,
+                    comuniModificati: 0,
+                    comuniEliminati: 0,
+                    errori: 0
+                };
+
+                try {
+                    // CENTRI NUOVI
+                    if (syncReport.centri.nuovi.length > 0) {
+                        addLog(`➕ Aggiunta ${syncReport.centri.nuovi.length} centri nuovi...`, 'info');
+                        for (const centro of syncReport.centri.nuovi) {
+                            try {
+                                const centroId = `centro_${centro.CODICECD}`;
+                                const centroData = {
+                                    CODICEPS: centro.CODICEPS || null,
+                                    CODICECD: centro.CODICECD || null,
+                                    RAGIONESOCIALE: centro.RAGIONESOCIALE || null,
+                                    INDIRIZZO: centro.INDIRIZZO || null,
+                                    LOCALITA: centro.LOCALITA || null,
+                                    PROV: centro.PROV || null,
+                                    CAP: centro.CAP ? String(centro.CAP) : null,
+                                    REGIONE: centro.REGIONE || null,
+                                    MAIL: centro.MAIL || null,
+                                    RECAPITOTELEFONICO: centro.RECAPITOTELEFONICO || null,
+                                    ANGA: centro.ANGA || null,
+                                    LAT: parseFloat(centro.Latitudine) || 0,
+                                    LON: parseFloat(centro.Longitudine) || 0,
+                                    ultimoAggiornamento: new Date()
+                                };
+
+                                if (!dryRun) {
+                                    await db.collection('centri').doc(centroId).set(centroData);
+                                }
+                                stats.centriAggiunti++;
+                            } catch (error) {
+                                stats.errori++;
+                                addLog(`❌ Errore aggiunta centro ${centro.CODICECD}: ${error.message}`, 'error');
+                            }
+                        }
+                        addLog(`✅ Aggiunti ${stats.centriAggiunti} centri`, 'success');
+                    }
+
+                    // CENTRI MODIFICATI
+                    if (syncReport.centri.modificati.length > 0) {
+                        addLog(`✏️ Aggiornamento ${syncReport.centri.modificati.length} centri modificati...`, 'info');
+                        for (const item of syncReport.centri.modificati) {
+                            try {
+                                const centro = item.new;
+                                const centroId = `centro_${centro.CODICECD}`;
+                                const centroData = {
+                                    CODICEPS: centro.CODICEPS || null,
+                                    CODICECD: centro.CODICECD || null,
+                                    RAGIONESOCIALE: centro.RAGIONESOCIALE || null,
+                                    INDIRIZZO: centro.INDIRIZZO || null,
+                                    LOCALITA: centro.LOCALITA || null,
+                                    PROV: centro.PROV || null,
+                                    CAP: centro.CAP ? String(centro.CAP) : null,
+                                    REGIONE: centro.REGIONE || null,
+                                    MAIL: centro.MAIL || null,
+                                    RECAPITOTELEFONICO: centro.RECAPITOTELEFONICO || null,
+                                    ANGA: centro.ANGA || null,
+                                    LAT: parseFloat(centro.Latitudine) || 0,
+                                    LON: parseFloat(centro.Longitudine) || 0,
+                                    ultimoAggiornamento: new Date()
+                                };
+
+                                if (!dryRun) {
+                                    await db.collection('centri').doc(centroId).set(centroData, { merge: true });
+                                }
+                                stats.centriModificati++;
+                            } catch (error) {
+                                stats.errori++;
+                                addLog(`❌ Errore modifica centro: ${error.message}`, 'error');
+                            }
+                        }
+                        addLog(`✅ Modificati ${stats.centriModificati} centri`, 'success');
+                    }
+
+                    // CENTRI DA ELIMINARE
+                    if (deleteObsolete && syncReport.centri.daEliminare.length > 0) {
+                        addLog(`🗑️ Eliminazione ${syncReport.centri.daEliminare.length} centri obsoleti...`, 'warning');
+                        for (const centro of syncReport.centri.daEliminare) {
+                            try {
+                                const centroId = `centro_${centro.CODICECD}`;
+                                if (!dryRun) {
+                                    await db.collection('centri').doc(centroId).delete();
+                                }
+                                stats.centriEliminati++;
+                            } catch (error) {
+                                stats.errori++;
+                                addLog(`❌ Errore eliminazione centro ${centro.CODICECD}: ${error.message}`, 'error');
+                            }
+                        }
+                        addLog(`✅ Eliminati ${stats.centriEliminati} centri`, 'success');
+                    }
+
+                    // COMUNI (se abilitato)
+                    if (syncComuni) {
+                        // COMUNI NUOVI
+                        if (syncReport.comuni.nuovi.length > 0) {
+                            addLog(`➕ Aggiunta ${syncReport.comuni.nuovi.length} comuni nuovi...`, 'info');
+                            for (const comune of syncReport.comuni.nuovi) {
+                                try {
+                                    const comuneNome = comune.Territorio;
+                                    const comuneId = `comune_${comuneNome.replace(/[^a-zA-Z0-9]/g, '_')}`;
+                                    const comuneData = {
+                                        Comune: comune.Territorio || null,
+                                        Provincia: comune.Provincia || null,
+                                        Regione: comune.Regione || null,
+                                        LAT: parseFloat(comune.Latitudine) || 0,
+                                        LON: parseFloat(comune.Longitudine) || 0,
+                                        Morti: parseInt(comune.Morti) || 0,
+                                        Feriti: parseInt(comune.Feriti) || 0,
+                                        Incidenti: parseInt(comune.Incidenti) || 0,
+                                        Soccorsi: parseInt(comune.Soccorsi) || 0,
+                                        ultimoAggiornamento: new Date()
+                                    };
+
+                                    if (!dryRun) {
+                                        await db.collection('comuni').doc(comuneId).set(comuneData);
+                                    }
+                                    stats.comuniAggiunti++;
+                                } catch (error) {
+                                    stats.errori++;
+                                }
+                            }
+                            addLog(`✅ Aggiunti ${stats.comuniAggiunti} comuni`, 'success');
+                        }
+
+                        // COMUNI MODIFICATI
+                        if (syncReport.comuni.modificati.length > 0) {
+                            addLog(`✏️ Aggiornamento ${syncReport.comuni.modificati.length} comuni modificati...`, 'info');
+                            for (const item of syncReport.comuni.modificati) {
+                                try {
+                                    const comune = item.new;
+                                    const comuneNome = comune.Territorio;
+                                    const comuneId = `comune_${comuneNome.replace(/[^a-zA-Z0-9]/g, '_')}`;
+                                    const comuneData = {
+                                        Comune: comune.Territorio || null,
+                                        Provincia: comune.Provincia || null,
+                                        Regione: comune.Regione || null,
+                                        LAT: parseFloat(comune.Latitudine) || 0,
+                                        LON: parseFloat(comune.Longitudine) || 0,
+                                        Morti: parseInt(comune.Morti) || 0,
+                                        Feriti: parseInt(comune.Feriti) || 0,
+                                        Incidenti: parseInt(comune.Incidenti) || 0,
+                                        Soccorsi: parseInt(comune.Soccorsi) || 0,
+                                        ultimoAggiornamento: new Date()
+                                    };
+
+                                    if (!dryRun) {
+                                        await db.collection('comuni').doc(comuneId).set(comuneData, { merge: true });
+                                    }
+                                    stats.comuniModificati++;
+                                } catch (error) {
+                                    stats.errori++;
+                                }
+                            }
+                            addLog(`✅ Modificati ${stats.comuniModificati} comuni`, 'success');
+                        }
+
+                        // COMUNI DA ELIMINARE
+                        if (deleteObsolete && syncReport.comuni.daEliminare.length > 0) {
+                            addLog(`🗑️ Eliminazione ${syncReport.comuni.daEliminare.length} comuni obsoleti...`, 'warning');
+                            for (const comune of syncReport.comuni.daEliminare) {
+                                try {
+                                    const comuneNome = comune.Comune;
+                                    const comuneId = `comune_${comuneNome.replace(/[^a-zA-Z0-9]/g, '_')}`;
+                                    if (!dryRun) {
+                                        await db.collection('comuni').doc(comuneId).delete();
+                                    }
+                                    stats.comuniEliminati++;
+                                } catch (error) {
+                                    stats.errori++;
+                                }
+                            }
+                            addLog(`✅ Eliminati ${stats.comuniEliminati} comuni`, 'success');
+                        }
+                    }
+
+                    addLog(`🎉 ${dryRun ? 'Simulazione' : 'Sync'} completata!`, 'success');
+                    addLog(`📊 Centri: +${stats.centriAggiunti} ✏️${stats.centriModificati} 🗑️${stats.centriEliminati}`, 'info');
+                    addLog(`📊 Comuni: +${stats.comuniAggiunti} ✏️${stats.comuniModificati} 🗑️${stats.comuniEliminati}`, 'info');
+                    if (stats.errori > 0) {
+                        addLog(`⚠️ ${stats.errori} errori durante il sync`, 'warning');
+                    }
+
+                } catch (error) {
+                    addLog(`❌ Errore sync: ${error.message}`, 'error');
+                } finally {
+                    setSyncing(false);
+                }
+            };
+
+            if (!user) {
+                return (
+                    <div className="min-h-screen bg-gradient-to-br from-blue-100 via-white to-purple-100 flex items-center justify-center p-4">
+                        <div className="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-md">
+                            <div className="text-center mb-6">
+                                <h1 className="text-3xl font-bold text-gray-800 mb-2">
+                                    🔄 Sync Intelligente Firebase
+                                </h1>
+                                <p className="text-gray-600">Accedi per iniziare</p>
+                            </div>
+
+                            <form onSubmit={handleLogin} className="space-y-4">
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-2">Email</label>
+                                    <input
+                                        type="email"
+                                        value={email}
+                                        onChange={(e) => setEmail(e.target.value)}
+                                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                                        required
+                                        disabled={loading}
+                                    />
+                                </div>
+
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-2">Password</label>
+                                    <input
+                                        type="password"
+                                        value={password}
+                                        onChange={(e) => setPassword(e.target.value)}
+                                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                                        required
+                                        disabled={loading}
+                                    />
+                                </div>
+
+                                <button
+                                    type="submit"
+                                    disabled={loading}
+                                    className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-lg transition disabled:opacity-50"
+                                >
+                                    {loading ? '⏳ Accesso...' : '🔐 Accedi'}
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="min-h-screen bg-gray-50 p-6">
+                    <div className="max-w-6xl mx-auto">
+                        {/* Header */}
+                        <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
+                            <div className="flex justify-between items-center">
+                                <div>
+                                    <h1 className="text-2xl font-bold text-gray-800">
+                                        🔄 Sync Intelligente Excel ↔ Firebase
+                                    </h1>
+                                    <p className="text-gray-600">
+                                        {user.email}
+                                    </p>
+                                </div>
+                                <button
+                                    onClick={() => auth.signOut()}
+                                    className="px-4 py-2 bg-red-50 hover:bg-red-100 text-red-600 rounded-lg transition"
+                                >
+                                    🚪 Esci
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Opzioni Sync */}
+                        <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
+                            <h2 className="text-xl font-bold text-gray-800 mb-4">⚙️ Opzioni Sync</h2>
+                            <div className="space-y-3">
+                                <label className="flex items-center space-x-3 cursor-pointer">
+                                    <input
+                                        type="checkbox"
+                                        checked={deleteObsolete}
+                                        onChange={(e) => setDeleteObsolete(e.target.checked)}
+                                        className="w-5 h-5 text-red-600 rounded focus:ring-red-500"
+                                        disabled={syncing || analyzing}
+                                    />
+                                    <div>
+                                        <span className="font-medium text-gray-900">
+                                            🗑️ Elimina record obsoleti
+                                        </span>
+                                        <p className="text-sm text-gray-600">
+                                            Elimina centri/comuni presenti in Firebase ma non nell'Excel
+                                        </p>
+                                    </div>
+                                </label>
+
+                                <label className="flex items-center space-x-3 cursor-pointer">
+                                    <input
+                                        type="checkbox"
+                                        checked={syncComuni}
+                                        onChange={(e) => setSyncComuni(e.target.checked)}
+                                        className="w-5 h-5 text-blue-600 rounded focus:ring-blue-500"
+                                        disabled={syncing || analyzing}
+                                    />
+                                    <div>
+                                        <span className="font-medium text-gray-900">
+                                            🏘️ Sincronizza anche comuni
+                                        </span>
+                                        <p className="text-sm text-gray-600">
+                                            Aggiorna anche la collezione comuni (foglio "Incidenti")
+                                        </p>
+                                    </div>
+                                </label>
+
+                                <label className="flex items-center space-x-3 cursor-pointer">
+                                    <input
+                                        type="checkbox"
+                                        checked={dryRun}
+                                        onChange={(e) => setDryRun(e.target.checked)}
+                                        className="w-5 h-5 text-yellow-600 rounded focus:ring-yellow-500"
+                                        disabled={syncing || analyzing}
+                                    />
+                                    <div>
+                                        <span className="font-medium text-gray-900">
+                                            🧪 Modalità Simulazione
+                                        </span>
+                                        <p className="text-sm text-gray-600">
+                                            Simula il sync senza modificare realmente il database
+                                        </p>
+                                    </div>
+                                </label>
+                            </div>
+                        </div>
+
+                        {/* Upload File */}
+                        <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
+                            <h2 className="text-xl font-bold text-gray-800 mb-4">📁 Carica File Excel</h2>
+                            <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:border-blue-500 transition">
+                                <input
+                                    type="file"
+                                    accept=".xlsx,.xls"
+                                    onChange={handleFileUpload}
+                                    disabled={syncing || analyzing}
+                                    className="hidden"
+                                    id="fileInput"
+                                />
+                                <label htmlFor="fileInput" className="cursor-pointer block">
+                                    <div className="text-6xl mb-4">📊</div>
+                                    <p className="text-lg font-medium text-gray-700 mb-2">
+                                        {analyzing ? '🔍 Analisi in corso...' : 'Clicca per selezionare test_rete.xlsx'}
+                                    </p>
+                                    <p className="text-sm text-gray-500">
+                                        Il file verrà confrontato con i dati attuali in Firebase
+                                    </p>
+                                </label>
+                            </div>
+                        </div>
+
+                        {/* Report Differenze */}
+                        {syncReport && (
+                            <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
+                                <h2 className="text-xl font-bold text-gray-800 mb-4">📊 Report Differenze</h2>
+                                
+                                {/* Centri */}
+                                <div className="mb-6">
+                                    <h3 className="text-lg font-semibold text-gray-700 mb-3">🏢 Centri ACI</h3>
+                                    <div className="grid grid-cols-4 gap-4">
+                                        <div className="bg-gray-50 rounded-lg p-4">
+                                            <div className="text-2xl font-bold text-gray-600">
+                                                {syncReport.centri.invariati.length}
+                                            </div>
+                                            <div className="text-sm text-gray-600">Invariati</div>
+                                        </div>
+                                        <div className="bg-green-50 rounded-lg p-4">
+                                            <div className="text-2xl font-bold text-green-600">
+                                                {syncReport.centri.nuovi.length}
+                                            </div>
+                                            <div className="text-sm text-green-700">Da Aggiungere</div>
+                                        </div>
+                                        <div className="bg-yellow-50 rounded-lg p-4">
+                                            <div className="text-2xl font-bold text-yellow-600">
+                                                {syncReport.centri.modificati.length}
+                                            </div>
+                                            <div className="text-sm text-yellow-700">Da Modificare</div>
+                                        </div>
+                                        <div className="bg-red-50 rounded-lg p-4">
+                                            <div className="text-2xl font-bold text-red-600">
+                                                {syncReport.centri.daEliminare.length}
+                                            </div>
+                                            <div className="text-sm text-red-700">
+                                                Da Eliminare {!deleteObsolete && '(disabilitato)'}
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Comuni */}
+                                {syncComuni && (
+                                    <div className="mb-6">
+                                        <h3 className="text-lg font-semibold text-gray-700 mb-3">🏘️ Comuni</h3>
+                                        <div className="grid grid-cols-4 gap-4">
+                                            <div className="bg-gray-50 rounded-lg p-4">
+                                                <div className="text-2xl font-bold text-gray-600">
+                                                    {syncReport.comuni.invariati.length}
+                                                </div>
+                                                <div className="text-sm text-gray-600">Invariati</div>
+                                            </div>
+                                            <div className="bg-green-50 rounded-lg p-4">
+                                                <div className="text-2xl font-bold text-green-600">
+                                                    {syncReport.comuni.nuovi.length}
+                                                </div>
+                                                <div className="text-sm text-green-700">Da Aggiungere</div>
+                                            </div>
+                                            <div className="bg-yellow-50 rounded-lg p-4">
+                                                <div className="text-2xl font-bold text-yellow-600">
+                                                    {syncReport.comuni.modificati.length}
+                                                </div>
+                                                <div className="text-sm text-yellow-700">Da Modificare</div>
+                                            </div>
+                                            <div className="bg-red-50 rounded-lg p-4">
+                                                <div className="text-2xl font-bold text-red-600">
+                                                    {syncReport.comuni.daEliminare.length}
+                                                </div>
+                                                <div className="text-sm text-red-700">
+                                                    Da Eliminare {!deleteObsolete && '(disabilitato)'}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Pulsante Esegui */}
+                                <div className="flex gap-4">
+                                    <button
+                                        onClick={executeSync}
+                                        disabled={syncing}
+                                        className={`flex-1 font-semibold py-3 px-6 rounded-lg transition disabled:opacity-50 ${
+                                            dryRun 
+                                                ? 'bg-yellow-600 hover:bg-yellow-700 text-white'
+                                                : 'bg-blue-600 hover:bg-blue-700 text-white'
+                                        }`}
+                                    >
+                                        {syncing 
+                                            ? '⏳ Sync in corso...' 
+                                            : dryRun 
+                                                ? '🧪 Simula Sync' 
+                                                : '🚀 Esegui Sync'
+                                        }
+                                    </button>
+                                    <button
+                                        onClick={() => {
+                                            setSyncReport(null);
+                                            setLogs([]);
+                                        }}
+                                        disabled={syncing}
+                                        className="px-6 py-3 bg-gray-200 hover:bg-gray-300 text-gray-700 font-semibold rounded-lg transition"
+                                    >
+                                        ↺ Reset
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Log */}
+                        {logs.length > 0 && (
+                            <div className="bg-white rounded-lg shadow-sm p-6">
+                                <h2 className="text-xl font-bold text-gray-800 mb-4">📋 Log Operazioni</h2>
+                                <div className="space-y-2 max-h-96 overflow-y-auto">
+                                    {logs.map((log, idx) => (
+                                        <div
+                                            key={idx}
+                                            className={`p-3 rounded-lg text-sm font-mono ${
+                                                log.type === 'success' ? 'bg-green-50 text-green-800' :
+                                                log.type === 'error' ? 'bg-red-50 text-red-800' :
+                                                log.type === 'warning' ? 'bg-yellow-50 text-yellow-800' :
+                                                'bg-gray-50 text-gray-800'
+                                            }`}
+                                        >
+                                            <span className="text-gray-500 mr-2">{log.time}</span>
+                                            {log.message}
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Istruzioni */}
+                        <div className="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-6">
+                            <h3 className="font-bold text-blue-900 mb-2">📖 Come Funziona:</h3>
+                            <ol className="list-decimal list-inside space-y-2 text-blue-800 text-sm">
+                                <li>Seleziona le opzioni di sync desiderate</li>
+                                <li>Carica il file Excel aggiornato</li>
+                                <li>Analizza il report delle differenze</li>
+                                <li>Esegui il sync (o simulalo prima)</li>
+                                <li>Verifica i log per conferma operazioni</li>
+                            </ol>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        ReactDOM.render(<SyncTool />, document.getElementById('root'));
+    </script>
+</body>
+</html>
