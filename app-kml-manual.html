@@ -537,12 +537,37 @@
                 let polygonsAdded = 0;
                 let notFoundCount = 0;
                 
-                // Stile poligoni
-                const polygonStyle = {
-                    color: '#1e3a8a',        // Blu scuro bordo
-                    weight: 2,
-                    fillColor: '#3b82f6',    // Blu chiaro riempimento
-                    fillOpacity: 0.2,        // 20% opacità (80% trasparenza)
+                // Funzione per determinare il colore in base alla convenzione
+                const getPolygonStyle = (comune) => {
+                    const conv = comune.Convenzione;
+                    
+                    // Verde per PS
+                    if (conv === 'PS' || conv === true || conv === 'Si') {
+                        return {
+                            color: '#15803d',        // Verde scuro bordo
+                            weight: 2,
+                            fillColor: '#22c55e',    // Verde chiaro riempimento
+                            fillOpacity: 0.3,        // 30% opacità
+                        };
+                    }
+                    // Giallo per Competitor e Altro
+                    else if (conv === 'Competitor' || conv === 'Altro') {
+                        return {
+                            color: '#ca8a04',        // Giallo scuro bordo
+                            weight: 2,
+                            fillColor: '#fbbf24',    // Giallo chiaro riempimento
+                            fillOpacity: 0.3,        // 30% opacità
+                        };
+                    }
+                    // Blu per Nessuna convenzione (default)
+                    else {
+                        return {
+                            color: '#1e3a8a',        // Blu scuro bordo
+                            weight: 2,
+                            fillColor: '#3b82f6',    // Blu chiaro riempimento
+                            fillOpacity: 0.2,        // 20% opacità
+                        };
+                    }
                 };
                 
                 comuniList.forEach((comune, idx) => {
@@ -552,9 +577,12 @@
                     if (idx < 3) {
                         console.log(`🔍 Comune ${idx}:`, comuneName);
                         console.log('   Oggetto completo:', comune);
+                        console.log('   Convenzione:', comune.Convenzione);
                     }
                     
                     if (comuniPolygons[comuneName]) {
+                        // Ottieni lo stile dinamico in base alla convenzione
+                        const polygonStyle = getPolygonStyle(comune);
                         const polygon = L.polygon(comuniPolygons[comuneName], polygonStyle);
                         polygon.bindTooltip(comuneName, { permanent: false, direction: 'center' });
                         polygon.addTo(layerGroup);
@@ -562,6 +590,7 @@
                         
                         if (idx < 3) {
                             console.log('   ✅ Trovato in KML!');
+                            console.log('   🎨 Colore:', polygonStyle.fillColor);
                         }
                     } else {
                         notFoundCount++;
