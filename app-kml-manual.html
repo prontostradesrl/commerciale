@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Analisi Geografica Rete Pronto Strade v 6.0 - Firebase</title>
+    <title>Analisi Geografica Rete Pronto Strade v5.0 - Firebase</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
@@ -27,18 +27,33 @@
             background-color: #e0e7ff;
             color: #4f46e5;
         }
-        .marker-highlight {
-            animation: pulse-glow 2s ease-in-out infinite;
-            filter: drop-shadow(0 0 12px rgba(37, 99, 235, 0.8)) drop-shadow(0 0 20px rgba(37, 99, 235, 0.4));
+        /* Custom div icon - rimuove bordi e padding */
+        .custom-div-icon {
+            background: none !important;
+            border: none !important;
+            margin: 0 !important;
+            padding: 0 !important;
         }
-        @keyframes pulse-glow {
+        /* Animazione marker evidenziato - SUPER visibile */
+        .marker-highlight-active {
+            animation: pulse-super-bright 1.2s ease-in-out infinite;
+            transform-origin: center center;
+            display: block !important;
+            width: 40px !important;
+            height: 40px !important;
+        }
+        @keyframes pulse-super-bright {
             0%, 100% {
-                transform: scale(1);
-                filter: drop-shadow(0 0 12px rgba(37, 99, 235, 0.8)) drop-shadow(0 0 20px rgba(37, 99, 235, 0.4));
+                transform: scale(1) rotate(0deg);
+                filter: drop-shadow(0 0 20px rgba(59, 130, 246, 1)) 
+                        drop-shadow(0 0 35px rgba(59, 130, 246, 0.8))
+                        drop-shadow(0 0 50px rgba(59, 130, 246, 0.5));
             }
             50% {
-                transform: scale(1.08);
-                filter: drop-shadow(0 0 16px rgba(37, 99, 235, 1)) drop-shadow(0 0 30px rgba(37, 99, 235, 0.6));
+                transform: scale(1.2) rotate(3deg);
+                filter: drop-shadow(0 0 30px rgba(59, 130, 246, 1)) 
+                        drop-shadow(0 0 50px rgba(59, 130, 246, 1))
+                        drop-shadow(0 0 70px rgba(59, 130, 246, 0.7));
             }
         }
     </style>
@@ -244,7 +259,7 @@
             const [comuniPolygons, setComuniPolygons] = useState({}); // Poligoni comuni da KML
             const polygonLayerRef = useRef(null); // Layer group per poligoni
             const centroMarkersRef = useRef({}); // Riferimenti ai marker dei centri
-            const highlightMarkerRef = useRef(null); // Marker evidenziato corrente
+            const highlightMarkersRef = useRef([]); // Array di marker evidenziati
             
             const [selectedRegione, setSelectedRegione] = useState('');
             const [selectedProvincia, setSelectedProvincia] = useState('');
@@ -955,69 +970,169 @@
                 }
             }, [centri, mapReady]);
             
-            // Evidenzia il centro selezionato sulla mappa usando un marker overlay
+            // Evidenzia il centro selezionato sulla mappa
             useEffect(() => {
-                if (!mapRef.current) return;
-                
-                // Rimuovi il marker di evidenziazione precedente se esiste
-                if (highlightMarkerRef.current) {
-                    mapRef.current.removeLayer(highlightMarkerRef.current);
-                    highlightMarkerRef.current = null;
+                if (!mapRef.current) {
+                    console.log('⚠️ Mappa non pronta');
+                    return;
                 }
                 
-                // Crea icone evidenziate (più grandi con animazione)
-                const createHighlightIcon = (isRed = false) => {
-                    return L.icon({
-                        iconUrl: isRed ? 'LOGO_ROSSO.png' : LOGO_ACI_BASE64,
-                        iconSize: [50, 50],
-                        iconAnchor: [25, 25],
-                        popupAnchor: [0, -25],
-                        className: 'marker-highlight'
-                    });
-                };
+                console.log('🔆 Aggiornamento evidenziazione centri...', {
+                    modalita,
+                    selectedCentro: selectedCentro?.CODICECD,
+                    risultatiCentri: risultatiCentri.length
+                });
                 
-                // Evidenzia il centro selezionato (modalità Centro → Comuni)
-                if (selectedCentro && selectedCentro.coordinates) {
-                    const isRed = selectedCentro.ANGA === 'NO' || selectedCentro.ANGA === 'no';
-                    const highlightIcon = createHighlightIcon(isRed);
-                    
-                    highlightMarkerRef.current = L.marker(
-                        [selectedCentro.coordinates.lat, selectedCentro.coordinates.lng],
-                        { 
-                            icon: highlightIcon,
-                            zIndexOffset: 1000
+                // Rimuovi tutti i marker di evidenziazione precedenti E ripristina marker originali
+                highlightMarkersRef.current.forEach(item => {
+                    try {
+                        if (item.highlightMarker && mapRef.current) {
+                            mapRef.current.removeLayer(item.highlightMarker);
                         }
-                    ).addTo(mapRef.current);
-                    
-                    console.log('🔆 Centro evidenziato:', selectedCentro.CODICECD);
-                }
-                
-                // Evidenzia i centri nella lista risultati (modalità Comune → Centri)
-                if (modalita === 'comune-centri' && risultatiCentri.length > 0) {
-                    // Per la modalità comune-centri, evidenzia tutti i centri nella lista
-                    risultatiCentri.forEach((centro, idx) => {
-                        if (centro.coordinates && idx < 5) { // Evidenzia solo i primi 5 per non sovraccaricare
-                            const isRed = centro.ANGA === 'NO' || centro.ANGA === 'no';
-                            const highlightIcon = createHighlightIcon(isRed);
-                            
-                            L.marker(
-                                [centro.coordinates.lat, centro.coordinates.lng],
-                                { 
-                                    icon: highlightIcon,
-                                    zIndexOffset: 1000 - idx
-                                }
-                            ).addTo(mapRef.current);
+                        if (item.originalMarker && item.wasHidden) {
+                            item.originalMarker.setOpacity(1);
                         }
-                    });
-                    console.log('🔆 Centri evidenziati:', Math.min(risultatiCentri.length, 5));
-                }
-                
-                // Cleanup quando il componente viene smontato o cambiano le dipendenze
-                return () => {
-                    if (highlightMarkerRef.current && mapRef.current) {
-                        mapRef.current.removeLayer(highlightMarkerRef.current);
-                        highlightMarkerRef.current = null;
+                    } catch (e) {
+                        console.warn('⚠️ Errore ripristino:', e);
                     }
+                });
+                highlightMarkersRef.current = [];
+                
+                // MODALITÀ: Centro → Comuni
+                if (modalita === 'centro-comuni' && selectedCentro && selectedCentro.coordinates) {
+                    const { lat, lng } = selectedCentro.coordinates;
+                    console.log('📍 Tentativo evidenziazione centro:', {
+                        codice: selectedCentro.CODICECD,
+                        lat, 
+                        lng,
+                        anga: selectedCentro.ANGA
+                    });
+                    
+                    if (lat && lng && lat !== 0 && lng !== 0) {
+                        const isRed = selectedCentro.ANGA === 'NO' || selectedCentro.ANGA === 'no';
+                        
+                        // Nascondi il marker originale
+                        const originalMarkerData = centroMarkersRef.current[selectedCentro.CODICECD];
+                        if (originalMarkerData && originalMarkerData.marker) {
+                            originalMarkerData.marker.setOpacity(0);
+                        }
+                        
+                        // Usa DivIcon con HTML custom per controllo completo
+                        const iconUrl = isRed ? 'LOGO_ROSSO.png' : LOGO_ACI_BASE64;
+                        const highlightIcon = L.divIcon({
+                            html: `<img src="${iconUrl}" style="width: 40px; height: 40px; display: block;" class="marker-highlight-active">`,
+                            iconSize: [40, 40],
+                            iconAnchor: [20, 20],
+                            className: 'custom-div-icon'
+                        });
+                        
+                        try {
+                            const highlightMarker = L.marker([lat, lng], { 
+                                icon: highlightIcon,
+                                zIndexOffset: 9999,
+                                interactive: true
+                            }).addTo(mapRef.current);
+                            
+                            // Aggiungi popup anche al marker evidenziato
+                            if (originalMarkerData && originalMarkerData.marker) {
+                                const popup = originalMarkerData.marker.getPopup();
+                                if (popup) {
+                                    highlightMarker.bindPopup(popup.getContent());
+                                }
+                            }
+                            
+                            highlightMarkersRef.current.push({
+                                highlightMarker: highlightMarker,
+                                originalMarker: originalMarkerData?.marker,
+                                wasHidden: true
+                            });
+                            
+                            console.log('✅ Centro evidenziato con DivIcon! Dimensione: 80x80', selectedCentro.CODICECD);
+                        } catch (e) {
+                            console.error('❌ Errore creazione marker highlight:', e);
+                            if (originalMarkerData && originalMarkerData.marker) {
+                                originalMarkerData.marker.setOpacity(1);
+                            }
+                        }
+                    } else {
+                        console.warn('⚠️ Coordinate non valide per evidenziazione');
+                    }
+                }
+                
+                // MODALITÀ: Comune → Centri
+                if (modalita === 'comune-centri' && risultatiCentri.length > 0) {
+                    console.log('📍 Evidenziazione multipla centri, totale:', risultatiCentri.length);
+                    let highlighted = 0;
+                    
+                    risultatiCentri.forEach((centro, idx) => {
+                        if (centro.coordinates && idx < 10) {
+                            const { lat, lng } = centro.coordinates;
+                            if (lat && lng && lat !== 0 && lng !== 0) {
+                                const isRed = centro.ANGA === 'NO' || centro.ANGA === 'no';
+                                
+                                // Nascondi il marker originale
+                                const originalMarkerData = centroMarkersRef.current[centro.CODICECD];
+                                if (originalMarkerData && originalMarkerData.marker) {
+                                    originalMarkerData.marker.setOpacity(0);
+                                }
+                                
+                                const iconUrl = isRed ? 'LOGO_ROSSO.png' : LOGO_ACI_BASE64;
+                                const highlightIcon = L.divIcon({
+                                    html: `<img src="${iconUrl}" style="width: 40px; height: 40px; display: block;" class="marker-highlight-active">`,
+                                    iconSize: [40, 40],
+                                    iconAnchor: [20, 20],
+                                    className: 'custom-div-icon'
+                                });
+                                
+                                try {
+                                    const highlightMarker = L.marker([lat, lng], { 
+                                        icon: highlightIcon,
+                                        zIndexOffset: 9999 - idx,
+                                        interactive: true
+                                    }).addTo(mapRef.current);
+                                    
+                                    // Aggiungi popup
+                                    if (originalMarkerData && originalMarkerData.marker) {
+                                        const popup = originalMarkerData.marker.getPopup();
+                                        if (popup) {
+                                            highlightMarker.bindPopup(popup.getContent());
+                                        }
+                                    }
+                                    
+                                    highlightMarkersRef.current.push({
+                                        highlightMarker: highlightMarker,
+                                        originalMarker: originalMarkerData?.marker,
+                                        wasHidden: true
+                                    });
+                                    
+                                    highlighted++;
+                                } catch (e) {
+                                    console.error('❌ Errore creazione marker:', e);
+                                    if (originalMarkerData && originalMarkerData.marker) {
+                                        originalMarkerData.marker.setOpacity(1);
+                                    }
+                                }
+                            }
+                        }
+                    });
+                    console.log('✅ Centri evidenziati:', highlighted);
+                }
+                
+                // Cleanup
+                return () => {
+                    highlightMarkersRef.current.forEach(item => {
+                        try {
+                            if (item.highlightMarker && mapRef.current) {
+                                mapRef.current.removeLayer(item.highlightMarker);
+                            }
+                            if (item.originalMarker && item.wasHidden) {
+                                item.originalMarker.setOpacity(1);
+                            }
+                        } catch (e) {
+                            // Ignora errori durante la pulizia
+                        }
+                    });
+                    highlightMarkersRef.current = [];
                 };
             }, [selectedCentro, risultatiCentri, modalita]);
 
@@ -1762,7 +1877,7 @@
                         )}
                         
                         <h1 className="text-3xl md:text-4xl font-bold text-indigo-900 mb-2 text-center">
-                            🗺️ Analisi Geografica Rete Pronto Strade v 6.0
+                            🗺️ Analisi Geografica Rete Pronto Strade v5.0
                         </h1>
                         <p className="text-center text-gray-600 mb-6">
                             {centri.length > 0 ? '✅ Database caricato correttamente' : '⏳ Caricamento database...'}
